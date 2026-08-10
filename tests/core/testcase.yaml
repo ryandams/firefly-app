@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pure logic: mission policy, coulomb counting, report composition. No
+# hardware, no ports, no threads - these are fast and run everywhere.
+#
+#   west twister -T firefly-app/tests -p native_sim
+#   west twister -T firefly-app/tests -p nrf54lm20dk/nrf54lm20a/cpuapp \
+#                --device-testing --device-serial /dev/ttyACM0
+#
+tests:
+  firefly.core:
+    platform_allow:
+      - native_sim
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    integration_platforms:
+      - native_sim
+    tags:
+      - firefly
+      - core

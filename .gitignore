@@ -1,0 +1,7 @@
+build/
+build_*/
+twister-out*/
+*.o
+*.a
+compile_commands.json
+.vscode/ipch/

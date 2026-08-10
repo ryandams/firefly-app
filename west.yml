@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# T2 topology: this repository is the manifest repository. It imports the
+# nRF Connect SDK at a pinned revision, exactly as vestfrost-level3-imx-app
+# imports Zephyr.
+#
+# `self: path` matches the git repository name, so the clone URL and the
+# workspace directory always agree.
+#
+# Bump `revision` to move the whole project to a new NCS release, then run
+# ./2_workspace.sh again.
+manifest:
+  remotes:
+    - name: nrfconnect
+      url-base: https://github.com/nrfconnect
+
+  projects:
+    - name: nrf
+      remote: nrfconnect
+      repo-path: sdk-nrf
+      revision: v3.4.0
+      import:
+        # Trim the tree to what this application actually needs. Add entries as
+        # subsystems come online (bt, lwm2m, ...) rather than importing
+        # everything up front - west update time is the price.
+        name-allowlist:
+          - zephyr
+          - nrfxlib
+          - hal_nordic
+          - cmsis
+          - mbedtls
+          - mcuboot
+          - zcbor
+          - segger          # SystemView / RTT
+          - trusted-firmware-m
+
+  self:
+    path: firefly-app
