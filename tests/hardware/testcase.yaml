@@ -1,0 +1,6 @@
+tests:
+  firefly.hardware.gpio:
+    platform_allow: [nrf54lm20dk/nrf54lm20a/cpuapp]
+    tags: [firefly, hardware, gpio]
+    harness: ztest
+    timeout: 30

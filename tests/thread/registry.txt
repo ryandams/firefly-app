@@ -1,0 +1,3 @@
+# Production Thread subclasses must be registered with a behavior test.
+SrvController code/service/srvController.cpp tests/service/src/test_srvController.cpp
+SrvNetwork code/service/srvNetwork.cpp tests/service/src/test_srvNetwork.cpp

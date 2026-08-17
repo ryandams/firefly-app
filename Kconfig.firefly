@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every firefly-specific Kconfig symbol lives here, and ONLY here.
+#
+# It is sourced by each Zephyr application in this repo - the app itself and
+# each test suite under tests/. Those are separate applications with separate
+# Kconfig scopes: a symbol defined only in the app's Kconfig is invisible to
+# tests/, and assigning it in a test prj.conf is a fatal "undefined symbol"
+# error. One shared file avoids that whole class of bug.
+
+menu "Firefly application"
+
+config FIREFLY_LOG_LEVEL
+	int "Firefly log level"
+	default 3
+	help
+	  Used by every firefly LOG_MODULE_REGISTER. Defined here rather than in
+	  the app menu because it is shared across service/ and the test
+	  applications under tests/.
+
+config FIREFLY_BUS_TIMEOUT_MS
+	int "Message publication timeout (milliseconds)"
+	default 100
+	range 1 10000
+
+config FIREFLY_CONTROLLER_STACK_SIZE
+	int "Controller stack size"
+	default 2048
+	range 1024 16384
+
+config FIREFLY_TEST_HOOKS
+	bool "Test-only service dependency hooks"
+	depends on ZTEST
+	default n
+
+choice FIREFLY_MODEM_SERVICE
+	prompt "Modem service"
+	default FIREFLY_MODEM_SERVICE_NONE
+
+config FIREFLY_MODEM_SERVICE_NONE
+	bool "No real modem service"
+
+config FIREFLY_NETWORK
+	bool "Enable srvNetwork's real modem port (nRF93M1: PPP up, UDP send, PPP down)"
+	depends on MODEM
+	help
+	  Gates only srvNetwork.cpp's *real* modem/PPP/socket code (see the
+	  #ifdef CONFIG_FIREFLY_NETWORK block there). The class itself, and
+	  the options below, always exist - boards/tests without a modem
+	  wired up get a stub port instead and drive srvNetwork through
+	  CONFIG_FIREFLY_TEST_HOOKS's injectable port for testing.
+	  boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf turns this on.
+
+config FIREFLY_MODEM_TEST_NRF93M1
+	bool "Enable the raw-AT nRF93M1 modem test"
+	depends on DT_HAS_NORDIC_NRF93M1_ENABLED
+	help
+	  Gives srvModemTest_nrf93m1 exclusive ownership of the modem UART and
+	  executes the timed AT-command UDP test on each button-0 press. This is
+	  mutually exclusive with srvNetwork and does not use MODEM_CELLULAR,
+	  CMUX, PPP, or the Zephyr networking stack.
+
+endchoice
+
+config FIREFLY_MODEM_TEST_STACK_SIZE
+	int "Raw-AT modem test stack size"
+	default 4096
+	range 2048 16384
+
+config FIREFLY_MODEM_TEST_APN
+	string "Raw-AT test APN"
+	default "gsfleet.cxn"
+
+config FIREFLY_MODEM_TEST_SERVER_IP
+	string "Raw-AT test server IPv4 address"
+	default "172.188.83.251"
+
+config FIREFLY_MODEM_TEST_SERVER_PORT
+	int "Raw-AT test server UDP port"
+	default 49167
+	range 1 65535
+
+config FIREFLY_MODEM_TEST_MESSAGE
+	string "Raw-AT test payload"
+	default "test,message,GSFleet,0123456789"
+
+config FIREFLY_MODEM_TEST_REG_TIMEOUT_S
+	int "Raw-AT registration timeout"
+	default 60
+	range 1 600
+
+config FIREFLY_MODEM_TEST_RX_WAIT_MS
+	int "Raw-AT server reply wait"
+	default 1000
+	range 1 60000
+
+config FIREFLY_NETWORK_STACK_SIZE
+	int "Network service stack size"
+	default 4096
+	range 2048 16384
+
+config FIREFLY_NETWORK_CONNECT_TIMEOUT_S
+	int "Seconds to wait for PPP (L4) connectivity before giving up"
+	default 120
+	range 1 600
+
+config FIREFLY_NETWORK_DEST_IP
+	string "Destination IPv4 address for the UDP test message"
+	default "8.8.8.8"
+
+config FIREFLY_NETWORK_DEST_PORT
+	int "Destination UDP port"
+	default 4242
+	range 1 65535
+
+config FIREFLY_NETWORK_MESSAGE
+	string "Text string srvNetwork sends over UDP"
+	default "hello from firefly"
+
+config FIREFLY_NETWORK_SEND_SETTLE_MS
+	int "Delay after send() before disconnecting"
+	default 1000
+	range 0 60000
+	help
+	  sendto() only hands the datagram to the local network stack; it says
+	  nothing about whether the CMUX frame carrying it has actually drained
+	  over the modem UART. Without this wait, disconnect() (net_if_down +
+	  modem suspend, which sends CMUX CLD) can race ahead and tear the link
+	  down before the datagram is physically transmitted.
+
+endmenu

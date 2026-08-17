@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# srvController + myButtonListener: dispatch skeleton plus button0..3 ->
+# led0..3. No mission logic yet - this just proves the start/stop/dispatch/
+# button/LED wiring before policy lands on top.
+#
+tests:
+  firefly.service:
+    platform_allow:
+      - native_sim
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    integration_platforms:
+      - native_sim
+    tags:
+      - firefly
+      - service
+      - portable
+    timeout: 30

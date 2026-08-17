@@ -1,0 +1,6 @@
+tests:
+  firefly.gpio.emulation:
+    platform_allow: [native_sim]
+    integration_platforms: [native_sim]
+    tags: [firefly, gpio, integration, native]
+    timeout: 20

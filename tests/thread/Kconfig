@@ -1,0 +1,2 @@
+rsource "../../Kconfig.firefly"
+source "Kconfig.zephyr"

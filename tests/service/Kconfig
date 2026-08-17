@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# tests/ are separate Zephyr applications with their own Kconfig scope.
+rsource "../../Kconfig.firefly"
+
+source "Kconfig.zephyr"

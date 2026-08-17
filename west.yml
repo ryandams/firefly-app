@@ -7,8 +7,10 @@
 # `self: path` matches the git repository name, so the clone URL and the
 # workspace directory always agree.
 #
-# Bump `revision` to move the whole project to a new NCS release, then run
-# ./2_workspace.sh again.
+# This temporarily pins an exact sdk-nrf development snapshot for nRF93M1
+# support. sdk-nrf's own manifest selects the matching sdk-zephyr and module
+# revisions. Replace this hash with the first stable NCS release containing
+# nRF93M1 support, then run ./2_workspace.sh again.
 manifest:
   remotes:
     - name: nrfconnect
@@ -18,21 +20,25 @@ manifest:
     - name: nrf
       remote: nrfconnect
       repo-path: sdk-nrf
-      revision: v3.4.0
-      import:
-        # Trim the tree to what this application actually needs. Add entries as
-        # subsystems come online (bt, lwm2m, ...) rather than importing
-        # everything up front - west update time is the price.
-        name-allowlist:
-          - zephyr
-          - nrfxlib
-          - hal_nordic
-          - cmsis
-          - mbedtls
-          - mcuboot
-          - zcbor
-          - segger          # SystemView / RTT
-          - trusted-firmware-m
+      # sdk-nrf main on 2026-08-12. Its west.yml pins sdk-zephyr to
+      # 0e25e66118d903037be2350cccc382134b7e62ad, which contains the
+      # nordic,nrf93m1 vendor cellular modem driver.
+      revision: e8b176a4900a560d180112302fc5b48dde19bf70
+
+      # `import: true` pulls the whole NCS module set.
+      #
+      # Do NOT replace this with a name-allowlist without a very good reason.
+      # NCS modules are interdependent in ways that are not obvious from the
+      # application source: the nRF54L SoC definition alone reaches cmsis_6,
+      # hal_nordic, oberon-psa-crypto and the CRACEN drivers under
+      # nrf_security. Worse, a missing module does not fail as "file not
+      # found" - Zephyr's Kconfig sees the module-present flag as undefined,
+      # a SoC-level `select` then becomes unsatisfiable, and the build dies
+      # with an opaque dependency error pointing at an unrelated NXP SoC.
+      #
+      # If west update time genuinely becomes a problem later, trim this by
+      # starting from `west list` on a working build - not by guessing.
+      import: true
 
   self:
     path: firefly-app

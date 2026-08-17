@@ -1,0 +1,9 @@
+tests:
+  firefly.thread.contract:
+    platform_allow:
+      - native_sim
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    integration_platforms:
+      - native_sim
+    tags: [firefly, thread, contract, portable]
+    timeout: 15
