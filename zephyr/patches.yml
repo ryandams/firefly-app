@@ -15,3 +15,24 @@ patches:
       drivers/modem/vendor_modem_cellular/CMakeLists.txt and adds
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
+  - path: zephyr/fibocom-le270-driver.patch
+    sha256sum: c27bcb771ef0aadf4d879fc4108ce9cf5becc84661612fb781f0eab0ff6556cf
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-09-29
+    upstreamable: true
+    comments: |
+      Adds a Zephyr modem_cellular vendor driver for the Fibocom LE270
+      (cellular_fibocom_le270.c + fibocom,le270.yaml devicetree binding),
+      modeled on the existing cellular_quectel_eg800q.c driver. Unlike the
+      EG800Z, the LE270 documents AT+CMUX support (AT Commands User Manual
+      V1.6 section 4.16, up to 3 channels) and standard 3GPP PPP dial-up
+      (ATD*99***1#/AT+CGDATA), so it uses the plain CMUX+PPP chat scripts
+      rather than a custom no-CMUX transport; only one CMUX user pipe is
+      wired up to stay inside the documented 3-channel limit. Power/reset
+      timing (power_pulse_duration_ms=3100, reset_pulse_duration_ms=200)
+      comes from the LE270 Hardware Guide V2.2 sections 4.2/4.3. Wires the
+      new driver into drivers/modem/vendor_modem_cellular/CMakeLists.txt and
+      adds DT_HAS_FIBOCOM_LE270_ENABLED to Kconfig.cellular's CMUX-MTU-127
+      select list alongside the other 127-byte-DLCI modems.

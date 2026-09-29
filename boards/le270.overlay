@@ -1,0 +1,87 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Fibocom LE270 modem wired externally to this DK, on uart21 (SoC PERI
+ * domain, P1) - the same physical pins boards/eg800z.overlay uses, since
+ * only one external modem is ever populated on the DK at a time:
+ *
+ *   TXD     - P1.13 (SoC output -> modem MAIN_RXD)
+ *   RXD     - P1.14 (SoC input  <- modem MAIN_TXD)
+ *   RTS     - P1.11 (SoC output -> modem MAIN_CTS)
+ *   CTS     - P1.12 (SoC input  <- modem MAIN_RTS)
+ *   PWRKEY   - P0.00 (gpio0, active-low)
+ *   RESET_N  - P0.01 (gpio0, active-low)
+ *   MAIN_DTR - P0.02 (gpio0, active-low - see polarity note below)
+ *
+ * Unlike the EG800Z, this driver does NOT set `autostarts`: the LE270
+ * Hardware Guide V2.2 section 4.2 documents a normal PWRKEY power-on pulse
+ * (pull low >=650ms, VBAT stable >=30ms first) as the expected method, with
+ * no equivalent to the EG800Z's observed "boots on its own, a PWRKEY pulse
+ * turns it back off" behavior - unverified on real hardware, but the
+ * documented method is the safer default to start from.
+ *
+ * Polarity for PWRKEY/RESET_N: Hardware Guide V2.2 sections 4.2/4.3 - both
+ * active-LOW (pull low to trigger; idle high via the module's own internal
+ * pull-up), matching the EG800Z's own PWRKEY/RESET_N convention.
+ *
+ * Polarity for MAIN_DTR: section 3, Table 13 describes it only as "the
+ * external device wakes up the module" without spelling out idle/active
+ * levels as explicitly as the EG800Z's own Low Power Mode Application Note
+ * does. GPIO_ACTIVE_LOW here follows the same "DTR low = stay awake"
+ * convention boards/eg800z.overlay uses (and the common
+ * zephyr,cellular-modem-device.yaml binding's own documented default: DTR
+ * asserted/high-level when the UART is active) - worth confirming against
+ * real hardware since the LE270-EU datasheet lists PSM as unsupported for
+ * this variant, so DTR-gated sleep behavior has not been exercised here the
+ * way it has for the EG800Z.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	uart21_default_le270: uart21_default_le270 {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 13)>,
+				<NRF_PSEL(UART_RTS, 1, 11)>;
+		};
+
+		group2 {
+			psels = <NRF_PSEL(UART_RX, 1, 14)>,
+				<NRF_PSEL(UART_CTS, 1, 12)>;
+			bias-pull-up;
+		};
+	};
+
+	uart21_sleep_le270: uart21_sleep_le270 {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 13)>,
+				<NRF_PSEL(UART_RX, 1, 14)>,
+				<NRF_PSEL(UART_RTS, 1, 11)>,
+				<NRF_PSEL(UART_CTS, 1, 12)>;
+			low-power-enable;
+		};
+	};
+};
+
+&uart21 {
+	status = "okay";
+	pinctrl-0 = <&uart21_default_le270>;
+	pinctrl-1 = <&uart21_sleep_le270>;
+	pinctrl-names = "default", "sleep";
+	current-speed = <115200>;
+	hw-flow-control;
+	zephyr,pm-device-runtime-auto;
+
+	modem: modem {
+		compatible = "fibocom,le270";
+		mdm-power-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+		mdm-reset-gpios = <&gpio0 1 GPIO_ACTIVE_LOW>;
+		mdm-dtr-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
+		zephyr,pm-device-runtime-auto;
+	};
+};
+
+/ {
+	aliases {
+		modem = &modem;
+	};
+};

@@ -1,0 +1,169 @@
+diff --git a/drivers/modem/Kconfig.cellular b/drivers/modem/Kconfig.cellular
+index 8f65a7fb593..ac8d3cc2f08 100644
+--- a/drivers/modem/Kconfig.cellular
++++ b/drivers/modem/Kconfig.cellular
+@@ -22,7 +22,7 @@ config MODEM_CELLULAR
+ 		 DT_HAS_SWIR_HL7800_ENABLED || DT_HAS_TELIT_ME910G1_ENABLED || \
+ 		 DT_HAS_TELIT_ME310G1_ENABLED || DT_HAS_SQN_GM02S_ENABLED || \
+ 		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_QUECTEL_EG800Z_ENABLED || \
+-		 DT_HAS_SIMCOM_A76XX_ENABLED)
++		 DT_HAS_FIBOCOM_LE270_ENABLED || DT_HAS_SIMCOM_A76XX_ENABLED)
+ 	help
+ 	  This driver uses the generic 3gpp AT commands, along
+ 	  with the standard protocols CMUX and PPP, to configure
+
+diff --git a/drivers/modem/vendor_modem_cellular/CMakeLists.txt b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
+index a8b0958af92..bbbd7dd08f1 100644
+--- a/drivers/modem/vendor_modem_cellular/CMakeLists.txt
++++ b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
+@@ -8,6 +8,7 @@ if((CONFIG_DT_HAS_TELIT_ME910G1_ENABLED) OR (CONFIG_DT_HAS_TELIT_ME310G1_ENABLED
+ endif()
+ 
+ # zephyr-keep-sorted-start
++zephyr_library_sources_ifdef(CONFIG_DT_HAS_FIBOCOM_LE270_ENABLED cellular_fibocom_le270.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_NORDIC_NRF91_SLM_ENABLED cellular_nordic_nrf91_slm.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_NORDIC_NRF93M1_ENABLED cellular_nordic_nrf93m1.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG25_G_ENABLED cellular_quectel_eg25_g.c)
+
+diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
+new file mode 100644
+index 00000000000..700b60573e8
+--- /dev/null
++++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
+@@ -0,0 +1,116 @@
++/*
++ * Copyright (c) 2026 GS Fleet
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/drivers/modem/modem_cellular.h>
++
++#define DT_DRV_COMPAT fibocom_le270
++
++MODEM_CELLULAR_COMMON_CHAT_MATCHES();
++
++MODEM_CHAT_MATCHES_DEFINE(fibocom_le270_unsol, MODEM_CELLULAR_COMMON_UNSOL_MATCHES);
++
++MODEM_CHAT_SCRIPT_CMDS_DEFINE(
++	fibocom_le270_init_chat_script_cmds, MODEM_CHAT_SCRIPT_CMD_RESP("AT", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMEE=1", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=1", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGSN", imei_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMM", cgmm_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMI", cgmi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMR", cgmr_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CIMI", cimi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	/* Fibocom LE Series AT Commands User Manual V1.6 section 4.16: up to
++	 * 3 channels of CMUX multiplexing, basic mode, UIH frames only,
++	 * 115200 bps (port_speed=5), matching this UART's current-speed and
++	 * the 127-byte DLCI MTU MODEM_CELLULAR selects for this driver (see
++	 * Kconfig.cellular). */
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
++
++MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
++			 abort_matches, modem_cellular_chat_callback_handler, 30);
++
++MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_dial_chat_script_cmds,
++			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT=0,1", allow_match),
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
++			      /* Small delay before dialing, otherwise some
++			       * modules answer 'NO CARRIER' and abort. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("AT", 500),
++			      /* AT Commands User Manual V1.6 section 11.3
++			       * (D*99) documents ATD*99# as the plain form;
++			       * *99***1# additionally selects PDP context 1
++			       * (<cid>), matching AT+CGDCONT's default cid
++			       * that MODEM_CELLULAR configures. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP("ATD*99***1#", connect_match));
++
++MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_dial_chat_script, fibocom_le270_dial_chat_script_cmds,
++			 dial_abort_matches, modem_cellular_chat_callback_handler, 10);
++
++MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_periodic_chat_script_cmds,
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CSQ", csq_match));
++
++MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_periodic_chat_script,
++			 fibocom_le270_periodic_chat_script_cmds, abort_matches,
++			 modem_cellular_chat_callback_handler, 4);
++
++static const struct modem_cellular_vendor_config fibocom_le270_vendor = {
++	/* clang-format off */
++	.scripts = {
++		.init = &fibocom_le270_init_chat_script,
++		.dial = &fibocom_le270_dial_chat_script,
++		.periodic = &fibocom_le270_periodic_chat_script,
++		/* No .shutdown script: unlike the EG800Z (AT+QPOWD followed by
++		 * a documented "POWERED DOWN" URC), the LE270 Hardware Guide
++		 * V2.2 documents AT+CPWROFF returning a plain OK with no
++		 * completion URC, and separately documents hardware power-off
++		 * via a >=3.1s PWRKEY pulse as an equally valid method (section
++		 * 4.2). power_pulse_duration_ms below is sized to satisfy that
++		 * pulse directly, so RUN_SHUTDOWN_SCRIPT's power_pulse fallback
++		 * alone is sufficient - same pattern as cellular_quectel_eg800q.c.
++		 */
++	},
++	.unsol_matches = {
++		.matches = fibocom_le270_unsol,
++		.size = ARRAY_SIZE(fibocom_le270_unsol),
++	},
++	/* clang-format on */
++	/* Hardware Guide V2.2 section 4.2: power on needs PWRKEY pulled low
++	 * for >=650ms; hardware power off needs >=3.1s (3100ms). The
++	 * framework only supports one pulse duration for both directions, so
++	 * this uses the larger value - a longer-than-minimum power-on pulse
++	 * is harmless. */
++	.power_pulse_duration_ms = 3100,
++	/* RESET_N held low for >=100ms per section 4.3; doubled for margin. */
++	.reset_pulse_duration_ms = 200,
++	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing
++	 * diagrams are) - a starting point to tune against real hardware,
++	 * following the same margin the EG800Z entry uses for its own
++	 * undocumented startup time. */
++	.startup_time_ms = 15000,
++	.shutdown_time_ms = 10000,
++};
++
++/* One user pipe only, on DLCI 3: the AT Commands User Manual documents "up
++ * to 3 channels of CMUX multiplexing" for this series, one fewer than the
++ * 2-user-pipe template cellular_quectel_eg800q.c/eg800z.c use - stay inside
++ * that documented limit rather than assume it also covers a 4th DLCI. */
++#define MODEM_CELLULAR_DEVICE_FIBOCOM_LE270(inst)                                                 \
++	MODEM_DT_INST_PPP_DEFINE(inst, MODEM_CELLULAR_INST_NAME(ppp, inst), NULL, 98, 1500, 64);  \
++                                                                                                   \
++	static struct modem_cellular_data MODEM_CELLULAR_INST_NAME(data, inst) = {                \
++		.chat_delimiter = "\r",                                                           \
++		.chat_filter = "\n",                                                              \
++		.ppp = &MODEM_CELLULAR_INST_NAME(ppp, inst),                                      \
++	};                                                                                        \
++                                                                                                   \
++	MODEM_CELLULAR_DEFINE_AND_INIT_USER_PIPES(inst, (user_pipe_0, 3))                          \
++                                                                                                   \
++	MODEM_CELLULAR_DEFINE_INSTANCE(inst, &fibocom_le270_vendor)
++
++DT_INST_FOREACH_STATUS_OKAY(MODEM_CELLULAR_DEVICE_FIBOCOM_LE270)
+
+diff --git a/dts/bindings/modem/fibocom,le270.yaml b/dts/bindings/modem/fibocom,le270.yaml
+new file mode 100644
+index 00000000000..c4c6a41bc49
+--- /dev/null
++++ b/dts/bindings/modem/fibocom,le270.yaml
+@@ -0,0 +1,13 @@
++description: Fibocom LE270 modem
++
++compatible: "fibocom,le270"
++
++include: zephyr,cellular-modem-device.yaml
++
++properties:
++  mdm-power-gpios:
++    type: phandle-array
++    required: true
++
++  zephyr,mdm-reset-behavior:
++    default: ["toggle_on_recovery"]
