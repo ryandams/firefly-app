@@ -1,0 +1,141 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Quectel EG800Z modem wired externally to this DK, on uart21 (SoC PERI
+ * domain, P1). Root cause of the long "no raw RX ever, on any UART/pin/API
+ * combination" saga that predates this file's git history: the RS232/TTL
+ * level converter on the modem side was not powered on the MCU side - not a
+ * UART peripheral, pinctrl, or driver issue. Now fixed, and RTS/CTS are
+ * wired too, so this uses hardware flow control with the async API - the
+ * combination Nordic's own docs recommend, and the one that makes the
+ * nRF54L/H "reliable reception without HWFC" TIMER workaround unnecessary
+ * (see "Reliable reception on nRF54L and nRF54H Series" in the nRF Connect
+ * SDK UART driver docs: with HWFC, the receiver is always restarted when the
+ * line goes idle, which is exactly what that workaround exists to paper
+ * over in its absence). No `timer` property or dedicated TIMER instance
+ * needed here for that reason.
+ *
+ * Pins used (all on GPIO port P1, since a peripheral instance's pins must
+ * all share one port):
+ *   TXD   - P1.13 (SoC output -> modem RXD)
+ *   RXD   - P1.14 (SoC input  <- modem TXD)
+ *   RTS   - P1.11 (SoC output -> modem CTS)
+ *   CTS   - P1.12 (SoC input  <- modem RTS)
+ *   PWRKEY  - P0.00 (gpio0, active-low)
+ *   RESET_N - P0.01 (gpio0, active-low)
+ *   MAIN_DTR - P0.02 (gpio0, active-low - see polarity note below)
+ * PWRKEY/RESET_N/MAIN_DTR stay on gpio0 regardless of which UART instance
+ * carries TXD/RXD/RTS/CTS - plain GPIO control lines aren't tied to a UART
+ * peripheral. Rewire mdm-power-gpios/mdm-reset-gpios/mdm-dtr-gpios below to
+ * match whatever pins PWRKEY/RESET_N/MAIN_DTR are actually connected to.
+ * boards/le270.overlay wires the Fibocom LE270 to these same physical pins
+ * (only one external modem is ever populated on the DK at a time).
+ *
+ * Polarity, from the EG800Z hardware design guide and Low Power Mode
+ * Application Note:
+ *  - PWRKEY and RESET_N are both active-LOW (pull low to trigger; idle
+ *    high via the module's own internal pull-up) - GPIO_ACTIVE_LOW here so
+ *    the driver's "assert" pulses drive the physical line low.
+ *  - MAIN_DTR: driving it LOW keeps the module awake / wakes it up; letting
+ *    it go HIGH is what allows the module to actually enter its low-power
+ *    state (opposite of the "DTR low = idle" convention some other modems
+ *    use). GPIO_ACTIVE_LOW here too, so that Zephyr's UART backend
+ *    asserting DTR (logical 1) around active UART use drives the physical
+ *    pin low - the "stay awake" state - and releases it high while idle,
+ *    which is what actually lets the module sleep.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	uart21_default_eg800z: uart21_default_eg800z {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 13)>,
+				<NRF_PSEL(UART_RTS, 1, 11)>;
+		};
+
+		group2 {
+			psels = <NRF_PSEL(UART_RX, 1, 14)>,
+				<NRF_PSEL(UART_CTS, 1, 12)>;
+			bias-pull-up;
+		};
+	};
+
+	uart21_sleep_eg800z: uart21_sleep_eg800z {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 13)>,
+				<NRF_PSEL(UART_RX, 1, 14)>,
+				<NRF_PSEL(UART_RTS, 1, 11)>,
+				<NRF_PSEL(UART_CTS, 1, 12)>;
+			low-power-enable;
+		};
+	};
+};
+
+&uart21 {
+	status = "okay";
+	pinctrl-0 = <&uart21_default_eg800z>;
+	pinctrl-1 = <&uart21_sleep_eg800z>;
+	pinctrl-names = "default", "sleep";
+	current-speed = <115200>;
+	hw-flow-control;
+	zephyr,pm-device-runtime-auto;
+
+	modem: modem {
+		compatible = "quectel,eg800z";
+		/* This module powers itself up whenever the DK does - confirmed
+		 * on hardware: with no PWRKEY pulse from the MCU at all, the
+		 * module boots and prints "^boot.rom'v" / "RDY".
+		 *
+		 * Without this property, modem_cellular's IDLE + RESUME path
+		 * (see modem_cellular_idle_event_handler) goes to
+		 * POWER_ON_PULSE and asserts PWRKEY for
+		 * power_pulse_duration_ms. On the EG800Z, PWRKEY is a single
+		 * toggle line and 650ms is past the >=650ms power-OFF
+		 * threshold, so on an already-running module that pulse
+		 * powers it DOWN. Observed exactly that: button press,
+		 * 650ms pulse, then "POWERED DOWN" from the module ~850ms
+		 * later, and every retry oscillated the module on and off.
+		 *
+		 * autostarts skips the pulse and goes straight to
+		 * AWAIT_POWER_ON, which waits for a ready indication (the
+		 * "RDY" match added to cellular_quectel_eg800z.c) or the
+		 * startup_time_ms timer.
+		 *
+		 * Trade-off worth knowing: modem_cellular does power the
+		 * module down on suspend (RUN_SHUTDOWN_SCRIPT's AT+QPOWD=1,
+		 * then POWER_OFF_PULSE), so at the start of a *later* round
+		 * the module really is off and autostarts means no pulse is
+		 * sent to wake it. That case still recovers rather than
+		 * dead-ending: the init script fails, and RUN_INIT_SCRIPT's
+		 * SCRIPT_FAILED path pulses RESET_N and PWRKEY via
+		 * toggle_on_recovery, which does bring it back - it just
+		 * costs one failed attempt first.
+		 */
+		autostarts;
+		mdm-power-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+		mdm-reset-gpios = <&gpio0 1 GPIO_ACTIVE_LOW>;
+		mdm-dtr-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
+		/* RI / RING. PPP Application Note V1.1 section 4.2: while the
+		 * port is in PPP data mode a URC is NOT written to the port,
+		 * and the module pulses RI from high to low for 120ms instead.
+		 * modemEg800zPpp.cpp watches for that edge and switches to
+		 * command mode to collect the URC, so without this property
+		 * that whole path is compiled out (it logs a warning saying
+		 * so). ACTIVE_LOW because the pulse is a pull-low, which makes
+		 * GPIO_INT_EDGE_TO_ACTIVE the high->low transition.
+		 *
+		 * P0.03 is this project's own choice, following DTR at P0.02 -
+		 * it is NOT dictated by the module. Rewire to match whatever
+		 * pin RI is actually connected to; a wrong pin here fails
+		 * silently, since a URC that is never indicated simply never
+		 * gets drained. */
+		mdm-ring-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+		zephyr,pm-device-runtime-auto;
+	};
+};
+
+/ {
+	aliases {
+		modem = &modem;
+	};
+};

@@ -1,0 +1,53 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * srvNetwork: an nRF93M1 module wired externally to this DK (there is no
+ * on-board modem here, unlike the nRF93M1 DK). uart30 is free on this board
+ * - not claimed by console/LEDs/buttons - and already has hardware-flow-
+ * control pinctrl defined by the board itself:
+ *
+ *   TX  = P0.06   RX  = P0.07   RTS = P0.08   CTS = P0.09
+ *
+ * mdm-power-gpios/mdm-reset-gpios/mdm-dtr-gpios below are this project's
+ * own choice, not anything the nRF93M1 module dictates - rewire to match
+ * whatever pins you actually connect POWER_KEY/RESET/DTR to.
+ * mdm-power-gpios is the only one the "nordic,nrf93m1" binding requires;
+ * mdm-reset-gpios is optional but is what the nRF93M1 DK's own reference
+ * wiring also uses.
+ *
+ * mdm-dtr-gpios: kept asserted for the module's whole lifetime by
+ * srvModemTest_nrf93m1.cpp, per the "nordic,nrf93m1" binding's own
+ * description of this property ("asserted when UART is active, deasserted
+ * when inactive, powered down, or in low power mode") - the intent is to
+ * tell the module the UART interface still needs to stay live even while
+ * PSM idles the radio, so it doesn't commit to full System OFF between
+ * cycles in the first place. This is a mitigation, not a documented
+ * guarantee: per the module's own getting-started guide, UART-based WAKE
+ * from System OFF (RXD activity, and DTR - both are UART1 pins) only
+ * works if AT+IPR set the baud rate to <=9600 before sleep, and this UART
+ * runs at 115200 - so srvModemTest_nrf93m1.cpp's PSM-cycle wake step still
+ * uses the documented fallback (POWERKEY, on mdm-power-gpios above) as the
+ * guaranteed recovery path regardless of what asserting DTR does or
+ * doesn't prevent.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&uart30 {
+	status = "okay";
+	hw-flow-control;
+	zephyr,pm-device-runtime-auto;
+
+	modem: modem {
+		compatible = "nordic,nrf93m1";
+		mdm-power-gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
+		mdm-reset-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+		mdm-dtr-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+		zephyr,pm-device-runtime-auto;
+	};
+};
+
+/ {
+	aliases {
+		modem = &modem;
+	};
+};
