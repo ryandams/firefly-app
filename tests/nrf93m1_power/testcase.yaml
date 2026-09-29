@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hardware-in-the-loop: the nRF93M1 modem must start fully unpowered, then
+# one triggered round must power it up, connect to the cellular network,
+# send data, and power it back down again - verified against the REAL
+# modem, not a fake port. Two scenarios flip FIREFLY_MODEM_SERVICE (a
+# mutually exclusive Kconfig choice, see Kconfig.firefly) between the two
+# approaches that already exist in this app: Zephyr's native PPP stack
+# (srvNetwork) and raw AT commands over the bare UART (srvModemTest_nrf93m1).
+# extra_configs below mirror boards/nrf93m1dk_nrf54l15_cpuapp.conf's two
+# (there, commented-out-by-default) modem modes.
+#
+#   west twister -T firefly-app/tests/nrf93m1_power -p <board> \
+#       --device-testing --device-serial /dev/ttyACM0 --tag hardware
+#
+tests:
+  firefly.nrf93m1_power.ppp:
+    platform_allow:
+      - nrf93m1dk/nrf54l15/cpuapp
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    tags: [firefly, hardware, modem, cellular, power, portable]
+    harness: ztest
+    timeout: 240
+    extra_configs:
+      - CONFIG_FIREFLY_NETWORK=y
+      - CONFIG_NETWORKING=y
+      - CONFIG_NET_NATIVE=y
+      - CONFIG_NET_L2_PPP=y
+      - CONFIG_NET_L2_ETHERNET=n
+      - CONFIG_NET_IPV4=y
+      - CONFIG_NET_IPV6=n
+      - CONFIG_NET_UDP=y
+      - CONFIG_NET_TCP=n
+      - CONFIG_NET_SOCKETS=y
+      - CONFIG_POSIX_API=y
+      - CONFIG_NET_MGMT=y
+      - CONFIG_NET_MGMT_EVENT=y
+      - CONFIG_NET_CONNECTION_MANAGER=y
+      - CONFIG_MODEM=y
+      - CONFIG_MODEM_CELLULAR=y
+      - CONFIG_MODEM_CELLULAR_APN="gsfleet.cxn"
+      - CONFIG_MODEM_BACKEND_UART_ASYNC_HWFC=y
+      - CONFIG_MODEM_BACKEND_UART_ASYNC_RECEIVE_IDLE_TIMEOUT_MS=1
+      - CONFIG_MODEM_CMUX_MTU=127
+      - CONFIG_MODEM_CMUX_WORK_BUFFER_SIZE_EXTRA=532
+      - CONFIG_MODEM_CELLULAR_UART_BUFFER_SIZES=532
+      - CONFIG_MODEM_CMUX_MSC_FC_THRESHOLD=32
+      - CONFIG_MODEM_CELLULAR_USER_PIPE_BUFFER_SIZES=1024
+  firefly.nrf93m1_power.raw_at:
+    platform_allow:
+      - nrf93m1dk/nrf54l15/cpuapp
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    tags: [firefly, hardware, modem, cellular, power, portable]
+    harness: ztest
+    timeout: 240
+    extra_configs:
+      - CONFIG_FIREFLY_NETWORK=n
+      - CONFIG_FIREFLY_MODEM_TEST_NRF93M1=y
+      - CONFIG_MODEM=n
+      - CONFIG_NETWORKING=n

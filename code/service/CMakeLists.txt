@@ -10,7 +10,7 @@
 
 add_library(firefly_service STATIC)
 target_sources(firefly_service PRIVATE srvController.cpp srvNetwork.cpp
-    srvModemTest_nrf93m1.cpp)
+    srvModemTest_nrf93m1.cpp srvModemTest_eg800z.cpp modemEg800zPpp.cpp modemEg800zPppNet.c)
 
 target_include_directories(firefly_service PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}

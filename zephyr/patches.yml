@@ -1,0 +1,17 @@
+patches:
+  - path: zephyr/quectel-eg800z-driver.patch
+    sha256sum: 1a4ba919239b85eaa2e1b2c0d62b921cad492d14085e385715bf849ce3c6d940
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-08-20
+    upstreamable: true
+    comments: |
+      Adds a Zephyr modem_cellular vendor driver for the Quectel EG800Z
+      (cellular_quectel_eg800z.c + quectel,eg800z.yaml devicetree binding),
+      modeled on the existing cellular_quectel_eg800q.c driver plus the
+      EG800Z's own documented PWRKEY/RESET/AT+QPOWD/AT+QSCLK timing and
+      commands. Wires the new driver into
+      drivers/modem/vendor_modem_cellular/CMakeLists.txt and adds
+      DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
+      select list alongside the other 127-byte-DLCI modems.

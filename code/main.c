@@ -2,6 +2,7 @@
 #include "srvController.h"
 #include "srvNetwork.h"
 #include "srvModemTest_nrf93m1.h"
+#include "srvModemTest_eg800z.h"
 #include "myButtonListener.h"
 #include "firefly.h"
 #include <zephyr/kernel.h>
@@ -56,6 +57,14 @@ int main(void)
     if (error != 0)
     {
         LOG_ERR("nRF93M1 modem test failed to start (%d)", error);
+    }
+#endif
+
+#ifdef CONFIG_FIREFLY_MODEM_TEST_EG800Z
+    error = srvModemTest_eg800z_start(&srvModemTest_sub);
+    if (error != 0)
+    {
+        LOG_ERR("EG800Z modem test failed to start (%d)", error);
     }
 #endif
 

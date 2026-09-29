@@ -41,15 +41,25 @@ config FIREFLY_MODEM_SERVICE_NONE
 	bool "No real modem service"
 
 config FIREFLY_NETWORK
-	bool "Enable srvNetwork's real modem port (nRF93M1: PPP up, UDP send, PPP down)"
-	depends on MODEM
+	bool "Enable srvNetwork's real modem port (PPP up, UDP send, PPP down)"
+	# NOT "depends on MODEM": every modem_cellular-backed modem (nRF93M1,
+	# Fibocom LE270) selects MODEM_CELLULAR, but the Quectel EG800Z has no
+	# AT+CMUX at all and never touches MODEM_CELLULAR - it is driven
+	# directly by modemEg800zPpp.cpp instead (see the
+	# FIREFLY_NETWORK_TRANSPORT choice below). NOT "depends on
+	# MODEM_MODULES" either: FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP selects
+	# MODEM_MODULES and sits inside a choice that depends on this symbol,
+	# so depending on it here would be a Kconfig dependency loop. Guard on
+	# things nothing here selects instead.
+	depends on MODEM_CELLULAR || DT_HAS_QUECTEL_EG800Z_ENABLED
 	help
 	  Gates only srvNetwork.cpp's *real* modem/PPP/socket code (see the
 	  #ifdef CONFIG_FIREFLY_NETWORK block there). The class itself, and
 	  the options below, always exist - boards/tests without a modem
 	  wired up get a stub port instead and drive srvNetwork through
 	  CONFIG_FIREFLY_TEST_HOOKS's injectable port for testing.
-	  boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf turns this on.
+	  conf/modem_*.conf turns this on for whichever modem a build target
+	  selects - see the outer firefly repo's 31/32/33_build.sh.
 
 config FIREFLY_MODEM_TEST_NRF93M1
 	bool "Enable the raw-AT nRF93M1 modem test"
@@ -60,12 +70,32 @@ config FIREFLY_MODEM_TEST_NRF93M1
 	  mutually exclusive with srvNetwork and does not use MODEM_CELLULAR,
 	  CMUX, PPP, or the Zephyr networking stack.
 
+config FIREFLY_MODEM_TEST_EG800Z
+	bool "Enable the raw-AT Quectel EG800Z modem test"
+	depends on DT_HAS_QUECTEL_EG800Z_ENABLED
+	help
+	  Gives srvModemTest_eg800z exclusive ownership of the modem UART and
+	  executes the timed AT-command test on each button press. This is
+	  mutually exclusive with srvNetwork and does not use MODEM_CELLULAR,
+	  CMUX, PPP, or the Zephyr networking stack.
+
 endchoice
 
 config FIREFLY_MODEM_TEST_STACK_SIZE
 	int "Raw-AT modem test stack size"
 	default 4096
 	range 2048 16384
+
+config FIREFLY_MODEM_TEST_READY_TIMEOUT_MS
+	int "Raw-AT post-power-up modem-ready poll timeout"
+	default 30000
+	range 100 60000
+	help
+	  The raw-AT tests poll "AT" until "OK" comes back instead of a fixed
+	  post-power-up sleep. This bounds how long they poll before giving up
+	  if the modem never responds. Default is sized for the EG800Z's
+	  documented (and inconsistent across its own datasheets) ~10-27s
+	  power-up time; the nRF93M1 test settles much faster in practice.
 
 config FIREFLY_MODEM_TEST_APN
 	string "Raw-AT test APN"
@@ -93,6 +123,89 @@ config FIREFLY_MODEM_TEST_RX_WAIT_MS
 	int "Raw-AT server reply wait"
 	default 1000
 	range 1 60000
+
+choice FIREFLY_NETWORK_TRANSPORT
+	prompt "srvNetwork modem transport"
+	depends on FIREFLY_NETWORK
+	default FIREFLY_NETWORK_TRANSPORT_MODEM_CELLULAR
+
+config FIREFLY_NETWORK_TRANSPORT_MODEM_CELLULAR
+	bool "Zephyr modem_cellular driver (CMUX + PPP)"
+	depends on MODEM_CELLULAR
+	help
+	  srvNetwork resumes the modem device with pm_device_runtime_get() and
+	  lets drivers/modem/modem_cellular.c own bring-up. That driver is
+	  CMUX-only: RUN_INIT_SCRIPT always advances to CONNECT_CMUX and both
+	  the AT pipe and the PPP pipe are CMUX DLCIs. Correct for the
+	  nRF93M1 and the Fibocom LE270 (both document AT+CMUX); impossible on
+	  the Quectel EG800Z, which has no AT+CMUX at all.
+
+config FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	bool "Quectel EG800Z direct PPP (no CMUX)"
+	depends on DT_HAS_QUECTEL_EG800Z_ENABLED
+	select MODEM_MODULES
+	select MODEM_CHAT
+	select MODEM_PPP
+	select MODEM_BACKEND_UART
+	help
+	  srvNetwork drives the EG800Z itself through modemEg800zPpp.cpp,
+	  built on modem_backend_uart + modem_chat + modem_ppp directly, with
+	  no modem_cellular and no CMUX. Follows the sequence in Quectel's
+	  EG800Z&EG915Z Series PPP Application Note V1.1 section 3.2 and
+	  switches between data mode and command mode per section 4.1.
+
+endchoice
+
+config FIREFLY_NETWORK_APN
+	string "APN used by the EG800Z PPP transport"
+	depends on FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	default "gsfleet.cxn"
+	help
+	  Substituted into AT+CGDCONT=1,"IP","<apn>" at compile time, so it is
+	  a plain string literal rather than a runtime-built chat script.
+	  The MODEM_CELLULAR transport configures its APN through the
+	  upstream driver's own CONFIG_MODEM_CELLULAR_APN instead - see
+	  conf/modem_nrf93m1_ext.conf and conf/modem_le270.conf.
+
+config FIREFLY_NETWORK_EG800Z_SIM_TIMEOUT_S
+	int "Seconds to poll AT+CPIN? for a ready SIM"
+	depends on FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	default 20
+	range 1 120
+	help
+	  PPP Application Note V1.1 section 3.2 exits the dial attempt if the
+	  (U)SIM is not ready within 20 s.
+
+config FIREFLY_NETWORK_EG800Z_REG_TIMEOUT_S
+	int "Seconds to poll AT+CREG?/AT+CGREG? for network registration"
+	depends on FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	default 60
+	range 1 600
+	help
+	  Same note: 60 s for network registration, after which its flowchart
+	  proceeds anyway rather than failing outright.
+
+config FIREFLY_NETWORK_EG800Z_RI_PULSE_MS
+	int "Expected RI URC pulse width in milliseconds"
+	depends on FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	default 120
+	range 1 2000
+	help
+	  Must match AT+QCFG="urc/ri/other"/"urc/ri/smsincoming"
+	  <pulse_duration>, which the AT Commands Manual V1.0 sections 4.4.6
+	  and 4.4.7 default to 120 ms over a 1-2000 ms range. PPP Application
+	  Note section 4.2 documents the same 120 ms high-to-low pulse as the
+	  data-mode URC indication.
+
+config FIREFLY_NETWORK_EG800Z_RI_WORKQ_STACK_SIZE
+	int "Stack size for the EG800Z RI/mode-switch workqueue"
+	depends on FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+	default 2048
+	range 1024 8192
+	help
+	  Mode switching runs AT commands via the blocking
+	  modem_chat_run_script(), so it cannot run on the system workqueue
+	  without stalling every other system work item for the duration.
 
 config FIREFLY_NETWORK_STACK_SIZE
 	int "Network service stack size"

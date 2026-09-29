@@ -1,24 +1,26 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
- * srvNetwork - two-stage power model. srvNetwork_start() only energizes
- * the modem's power domain/rail (network_port::power_on) - the modem chip
- * itself stays idle, no AT traffic. Each button0 press then runs one full
- * round: resume the modem (this is what actually starts sending AT
- * commands - see network_port::connect), bring the PPP link up, send one
- * UDP message, bring the PPP link back down, and suspend the modem again
- * (network_port::disconnect). srvNetwork_stop() releases the rail
- * (network_port::power_off).
+ * srvNetwork - fully power-cycled per round. srvNetwork_start()/stop()
+ * (network_port::power_on/power_off) do not touch the modem or its power
+ * domain at all - the modem stays completely unpowered from service start
+ * until the first button0 press. Each button0 press then runs one full
+ * round: energize the modem's power domain/rail where one exists, resume
+ * the modem device (this is what actually starts the power pulse/AT
+ * traffic - see network_port::connect), bring the PPP link up, send one
+ * UDP message, bring the PPP link back down, suspend the modem device, and
+ * release the rail again (network_port::disconnect).
  *
  * The AT traffic is deliberately gated behind the button press rather than
  * starting automatically at boot, to support power measurement setups that
- * need a precise, on-demand starting point. Each round fully power-cycles
- * the modem rather than leaving it dialed between rounds: on real hardware
- * an idle PPP call gets dropped by the network within a few seconds
- * regardless, and reconnecting to an already-dead call causes CMUX buffer
- * overruns and failed renegotiation - a full cycle per round is slower but
- * is what has proven reliable. Runs on its own persistent thread since
- * waiting for cellular registration can legitimately take up to
- * CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S seconds.
+ * need a precise, on-demand starting point and zero idle current between
+ * rounds (an energized-but-idle rail was observed to draw ~3 mA on
+ * nrf93m1dk). Each round fully power-cycles the modem rather than leaving
+ * it dialed between rounds: on real hardware an idle PPP call gets dropped
+ * by the network within a few seconds regardless, and reconnecting to an
+ * already-dead call causes CMUX buffer overruns and failed renegotiation -
+ * a full cycle per round is slower but is what has proven reliable. Runs
+ * on its own persistent thread since waiting for cellular registration can
+ * legitimately take up to CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S seconds.
  *
  * network_port mirrors myLeds.h's firefly_led_port: the real port drives
  * the actual modem/PPP/socket stack (only compiled in when

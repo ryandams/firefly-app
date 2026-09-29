@@ -1,10 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// srvNetwork - see srvNetwork.h for the contract. The real port (this
-// file's default) is only compiled when CONFIG_FIREFLY_NETWORK is set;
-// everywhere else (native_sim, the other test suites) gets a stub that
-// fails loudly if anything ever calls it without a test port installed
-// first via srvNetwork_set_port().
+// srvNetwork - fully power-cycled per round. srvNetwork_start()/stop()
+// (network_port::power_on/power_off) do not touch the modem or its power
+// domain at all - the modem stays completely unpowered from service start
+// until the first button0 press. Each button0 press then runs one full
+// round: energize the modem's power domain/rail where one exists, resume
+// the modem device (this is what actually starts the power pulse/AT
+// traffic - see network_port::connect), bring the PPP link up, send one
+// UDP message, bring the PPP link back down, suspend the modem device, and
+// release the rail again (network_port::disconnect).
+//
+// The AT traffic is deliberately gated behind the button press rather than
+// starting automatically at boot, to support power measurement setups that
+// need a precise, on-demand starting point and zero idle current between
+// rounds (an energized-but-idle rail was observed to draw ~3 mA on
+// nrf93m1dk). Each round fully power-cycles the modem rather than leaving
+// it dialed between rounds: on real hardware an idle PPP call gets dropped
+// by the network within a few seconds regardless, and reconnecting to an
+// already-dead call causes CMUX buffer overruns and failed renegotiation -
+// a full cycle per round is slower but is what has proven reliable. Runs
+// on its own persistent thread since waiting for cellular registration can
+// legitimately take up to CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S seconds.
+//
+// network_port mirrors myLeds.h's firefly_led_port: the real port drives
+// the actual modem/PPP/socket stack (only compiled in when
+// CONFIG_FIREFLY_NETWORK is set - see below), and CONFIG_FIREFLY_TEST_HOOKS
+// lets tests substitute a fake one to exercise srvNetwork's own control
+// flow without any real hardware.
 #include "srvNetwork.h"
 #include "event_bus.h"
 #include "thread.hpp"
@@ -25,6 +47,7 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/ppp.h>
 #include <zephyr/pm/device_runtime.h>
+#include "modemEg800zPpp.h"
 
 // Plain POSIX names (socket/sendto/close) rather than <zephyr/net/socket.h>'s
 // zsock_*-only API - matches zephyr/samples/net/cellular_modem, and unlike
@@ -99,7 +122,7 @@ void format_seconds(char *buf, size_t len, int64_t ms)
 void report_phase(const char *label, Mark a, Mark b)
 {
     if (g_marks.valid[a] && g_marks.valid[b]) {
-        char buf[16];
+        char buf[32];
         format_seconds(buf, sizeof(buf), g_marks.t[b] - g_marks.t[a]);
         LOG_INF("PHASE %-34s %8s s", label, buf);
     } else {
@@ -122,7 +145,7 @@ void report(int64_t round_start_ms)
     report_phase("--- teardown total ---", DISCONNECT_BEGIN, MODEM_SUSPEND_DONE);
     LOG_INF("--------------------------------------------------------------------");
     if (g_marks.valid[MODEM_SUSPEND_DONE]) {
-        char buf[16];
+        char buf[32];
         format_seconds(buf, sizeof(buf), g_marks.t[MODEM_SUSPEND_DONE] - round_start_ms);
         LOG_INF("%-38s %8s s", "CONNECTION WINDOW (button->suspended)", buf);
         if (g_marks.valid[SENT] && g_marks.valid[DISCONNECT_BEGIN]) {
@@ -159,26 +182,32 @@ NET_MGMT_REGISTER_EVENT_HANDLER(srv_network_l4,
                                  NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED,
                                  l4_event_handler, NULL);
 
-/* The modem sits behind a GPIO power domain (see modem_dcdc in the board's
- * own devicetree). power_on()/power_off() here only claim/release that
- * domain directly - the rail energizes (visible as "modem_dcdc is now ON"
- * in the log) but the modem device itself is never resumed, so it stays
- * idle: no power pulse, no AT traffic. Real hardware power measurement
- * needs that separation - AT commands should start exactly at the moment
- * we choose to resume the modem, not automatically as a side effect of
- * powering its rail.
+/* The modem sits behind a GPIO power domain on boards that have one (see
+ * modem_dcdc in the board's own devicetree). That rail, and the modem
+ * device's own resume/suspend, are both claimed/released from
+ * modem_connect()/modem_disconnect() - not from srvNetwork_start()/stop()
+ * at boot - so idle current between rounds is true zero (rail off), not
+ * "rail on, chip in reset". On nrf93m1dk that idle-rail draw measured
+ * ~3 mA with the rail claimed at boot, which is what motivated moving it
+ * here: AT traffic and RF only draw current during an explicit
+ * power-up-through-shutdown round, gated behind the button0 press.
  *
- * modem_connect() is what actually resumes the modem (pm_device_runtime_get
- * on the modem device, not the domain) - this is the call that starts the
- * power-pulse/RDY-wait/AT-command sequence, gated behind the button0
- * press. modem_disconnect() suspends it again afterwards: on real hardware
- * the cellular network drops an idle PPP call within a few seconds
- * regardless of what we do, and reconnecting to an already-dead call
- * causes CMUX buffer overruns and failed renegotiation (observed on
+ * modem_connect() powers the rail (where one exists) and then resumes the
+ * modem device (pm_device_runtime_get on the modem device) - this is the
+ * call that starts the power-pulse/RDY-wait/AT-command sequence.
+ * modem_disconnect() suspends the device first, then releases the rail: on
+ * real hardware the cellular network drops an idle PPP call within a few
+ * seconds regardless of what we do, and reconnecting to an already-dead
+ * call causes CMUX buffer overruns and failed renegotiation (observed on
  * nrf93m1dk) - a full power-cycle per round is slower but is the only
- * combination that has proven reliable. */
+ * combination that has proven reliable.
+ *
+ * power_on()/power_off() (the network_port hooks called from
+ * srvNetwork_start()/stop()) are therefore no-ops for the real port: there
+ * is nothing left to do at service start/stop once the rail moved into the
+ * per-round path. */
 #if DT_NODE_EXISTS(DT_NODELABEL(modem_dcdc))
-int modem_power_on(void *)
+int modem_domain_on(void)
 {
     const int err = pm_device_runtime_get(DEVICE_DT_GET(DT_NODELABEL(modem_dcdc)));
     if (err != 0) {
@@ -187,7 +216,7 @@ int modem_power_on(void *)
     return err;
 }
 
-int modem_power_off(void *)
+int modem_domain_off(void)
 {
     const int err = pm_device_runtime_put(DEVICE_DT_GET(DT_NODELABEL(modem_dcdc)));
     return (err == -EALREADY) ? 0 : err;
@@ -197,13 +226,15 @@ int modem_power_off(void *)
  * wired modem with only mdm-power-gpios) - nothing to pre-claim, the
  * modem's own resume in modem_connect() is the first thing that touches it
  * either way. */
+int modem_domain_on(void) { return 0; }
+int modem_domain_off(void) { return 0; }
+#endif
+
 int modem_power_on(void *) { return 0; }
 int modem_power_off(void *) { return 0; }
-#endif
 
 int modem_connect(void *)
 {
-    const struct device *modem = DEVICE_DT_GET(DT_ALIAS(modem));
     struct net_if *iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
 
     if (iface == nullptr) {
@@ -211,9 +242,20 @@ int modem_connect(void *)
         return -ENODEV;
     }
 
-    // Cached from the init chat script's AT+CGMR (see cellular_nordic_nrf93m1.c) - the
-    // modem is still powered off at this point, so this reports whatever the previous
-    // round queried. Empty on the very first round ever; populated from round 2 onward.
+#ifndef CONFIG_FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+    // Only meaningful for the modem_cellular transport (nRF93M1, Fibocom
+    // LE270): DEVICE_DT_GET on the modem node only resolves to a real
+    // device object when MODEM_CELLULAR has bound a driver to it, and the
+    // cellular_get_modem_info() API belongs to that driver. Under the
+    // EG800Z transport there is no such device - referencing it here is an
+    // undefined __device_dts_ord_* at link time.
+    const struct device *modem = DEVICE_DT_GET(DT_ALIAS(modem));
+
+    // Cached from the init chat script's AT+CGMR (see e.g.
+    // cellular_nordic_nrf93m1.c / cellular_fibocom_le270.c) - the modem is
+    // still powered off at this point, so this reports whatever the
+    // previous round queried. Empty on the very first round ever;
+    // populated from round 2 onward.
     char fw_version[64] = {};
     if (cellular_get_modem_info(modem, CELLULAR_MODEM_INFO_FW_VERSION, fw_version,
                                  sizeof(fw_version)) == 0 &&
@@ -222,18 +264,42 @@ int modem_connect(void *)
     } else {
         LOG_INF("modem firmware version: not yet queried (available from next round)");
     }
+#endif
 
     k_event_set(&g_l4_event, 0);
     g_marks = {};
 
+    trace_point("modem power domain on begin");
+    int err = modem_domain_on();
+    trace_point(err == 0 ? "modem power domain on complete" : "modem power domain on failed");
+    if (err != 0) {
+        LOG_ERR("modem domain resume failed (%d)", err);
+        return err;
+    }
+
+#ifdef CONFIG_FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+    // The EG800Z has no CMUX, so there is no modem_cellular device to resume -
+    // modemEg800zPpp owns the UART and runs the PPP application note's
+    // sequence itself, stopping at CONNECT so net_if_up() below still starts
+    // LCP/AUTH/IPCP inside this round's phase timing.
+    trace_point("EG800Z link_up begin (AT setup/SIM/registration/ATD*99#)");
+    err = modemEg800zPpp_link_up();
+    trace_point(err == 0 ? "EG800Z link_up complete (data mode)"
+                         : "EG800Z link_up failed");
+    if (err != 0) {
+        LOG_ERR("EG800Z link_up failed (%d)", err);
+        return err;
+    }
+#else
     trace_point("pm_device_runtime_get(modem) begin (power pulse/modem init/AT setup)");
-    int err = pm_device_runtime_get(modem);
+    err = pm_device_runtime_get(modem);
     trace_point(err == 0 ? "pm_device_runtime_get(modem) complete"
                          : "pm_device_runtime_get(modem) failed");
     if (err != 0) {
         LOG_ERR("modem resume failed (%d)", err);
         return err;
     }
+#endif
     mark(MODEM_RESUME_DONE);
 
     trace_point("net_if_up(PPP) begin (registration/PDP/PPP may occur hereafter)");
@@ -298,7 +364,9 @@ int modem_send(void *, const void *data, size_t len)
 
 int modem_disconnect(void *)
 {
+#ifndef CONFIG_FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
     const struct device *modem = DEVICE_DT_GET(DT_ALIAS(modem));
+#endif
     struct net_if *iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
     trace_point("disconnect begin");
     mark(DISCONNECT_BEGIN);
@@ -309,12 +377,26 @@ int modem_disconnect(void *)
     }
     mark(IF_DOWN_DONE);
 
+#ifdef CONFIG_FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
+    trace_point("EG800Z link_down begin");
+    int err = modemEg800zPpp_link_down();
+    trace_point(err == 0 ? "EG800Z link_down complete" : "EG800Z link_down failed");
+#else
     trace_point("pm_device_runtime_put(modem) begin");
-    const int err = pm_device_runtime_put(modem);
+    int err = pm_device_runtime_put(modem);
     trace_point((err == 0 || err == -EALREADY) ? "pm_device_runtime_put(modem) complete"
                                                 : "pm_device_runtime_put(modem) failed");
+    if (err == -EALREADY) { err = 0; }
+#endif
     mark(MODEM_SUSPEND_DONE);
-    return (err == -EALREADY) ? 0 : err;
+
+    trace_point("modem power domain off begin");
+    const int domain_err = modem_domain_off();
+    trace_point(domain_err == 0 ? "modem power domain off complete"
+                                 : "modem power domain off failed");
+    if (domain_err != 0) { LOG_ERR("modem domain suspend failed (%d)", domain_err); }
+
+    return (err != 0) ? err : domain_err;
 }
 
 const struct network_port g_default_port = {nullptr, modem_power_on, modem_connect, modem_send,
