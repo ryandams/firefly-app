@@ -2,16 +2,32 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Fibocom LE270 modem wired externally to this DK, on uart21 (SoC PERI
- * domain, P1) - the same physical pins boards/eg800z.overlay uses, since
- * only one external modem is ever populated on the DK at a time:
+ * domain, P1) - the same physical UART/PWRKEY pins boards/eg800z.overlay
+ * uses, since only one external modem is ever populated on the DK at a
+ * time:
  *
  *   TXD     - P1.13 (SoC output -> modem MAIN_RXD)
  *   RXD     - P1.14 (SoC input  <- modem MAIN_TXD)
  *   RTS     - P1.11 (SoC output -> modem MAIN_CTS)
  *   CTS     - P1.12 (SoC input  <- modem MAIN_RTS)
  *   PWRKEY   - P0.00 (gpio0, active-low)
- *   RESET_N  - P0.01 (gpio0, active-low)
- *   MAIN_DTR - P0.02 (gpio0, active-low - see polarity note below)
+ *
+ * RESET_N and MAIN_DTR are NOT wired here: on the Fibocom LE270 ADP
+ * (development board), both are only exposed as onboard physical
+ * buttons, not as header pins the DK can drive. Both are optional per
+ * zephyr,cellular-modem-device.yaml (only mdm-power-gpios is
+ * `required: true`), so this is a supported configuration, not a
+ * workaround:
+ *  - mdm-reset-gpios only gates zephyr,mdm-reset-behavior's
+ *    "toggle_on_recovery" - an automatic RESET_N pulse if the init chat
+ *    script ever fails to get responses. Without it, that one
+ *    auto-recovery path is unavailable; the ADP's reset button (or a
+ *    full power cycle) still works as a manual fallback.
+ *  - mdm-dtr-gpios only matters for DTR-gated sleep. The LE270-EU
+ *    datasheet lists PSM as unsupported for this variant, so there is no
+ *    low-power sleep mode here for DTR to gate in the first place -
+ *    leaving it unwired costs nothing for this project's PPP/UDP round
+ *    trip.
  *
  * Unlike the EG800Z, this driver does NOT set `autostarts`: the LE270
  * Hardware Guide V2.2 section 4.2 documents a normal PWRKEY power-on pulse
@@ -20,20 +36,9 @@
  * turns it back off" behavior - unverified on real hardware, but the
  * documented method is the safer default to start from.
  *
- * Polarity for PWRKEY/RESET_N: Hardware Guide V2.2 sections 4.2/4.3 - both
- * active-LOW (pull low to trigger; idle high via the module's own internal
- * pull-up), matching the EG800Z's own PWRKEY/RESET_N convention.
- *
- * Polarity for MAIN_DTR: section 3, Table 13 describes it only as "the
- * external device wakes up the module" without spelling out idle/active
- * levels as explicitly as the EG800Z's own Low Power Mode Application Note
- * does. GPIO_ACTIVE_LOW here follows the same "DTR low = stay awake"
- * convention boards/eg800z.overlay uses (and the common
- * zephyr,cellular-modem-device.yaml binding's own documented default: DTR
- * asserted/high-level when the UART is active) - worth confirming against
- * real hardware since the LE270-EU datasheet lists PSM as unsupported for
- * this variant, so DTR-gated sleep behavior has not been exercised here the
- * way it has for the EG800Z.
+ * Polarity for PWRKEY: Hardware Guide V2.2 section 4.2 - active-LOW (pull
+ * low to trigger; idle high via the module's own internal pull-up),
+ * matching the EG800Z's own PWRKEY convention.
  */
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
@@ -74,8 +79,6 @@
 	modem: modem {
 		compatible = "fibocom,le270";
 		mdm-power-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
-		mdm-reset-gpios = <&gpio0 1 GPIO_ACTIVE_LOW>;
-		mdm-dtr-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
 		zephyr,pm-device-runtime-auto;
 	};
 };
