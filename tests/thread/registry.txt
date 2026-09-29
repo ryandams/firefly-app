@@ -2,3 +2,4 @@
 SrvController code/service/srvController.cpp tests/service/src/test_srvController.cpp
 SrvNetwork code/service/srvNetwork.cpp tests/service/src/test_srvNetwork.cpp
 SrvModemTest code/service/srvModemTest_nrf93m1.cpp tests/nrf93m1_power/src/test_nrf93m1_power.cpp
+SrvModemTestEg800z code/service/srvModemTest_eg800z.cpp tests/eg800z_power/src/test_eg800z_power.cpp

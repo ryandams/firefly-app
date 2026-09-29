@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hardware-in-the-loop: the Quectel EG800Z modem must start fully unpowered,
+# then one triggered round must power it up, connect to the cellular
+# network, send data, and power it back down again - verified against the
+# REAL modem, not a fake port. Only the raw-AT path
+# (srvModemTest_eg800z, no CMUX) is covered here; the EG800Z's PPP path has
+# no modem_cellular device to query PM state on the way
+# tests/nrf93m1_power's ppp scenario does, so it is validated by flashing
+# 32_build.sh's image instead.
+#
+#   west twister -T firefly-app/tests/eg800z_power -p <board> \
+#       --device-testing --device-serial /dev/ttyACM0 --tag hardware
+#
+tests:
+  firefly.eg800z_power.raw_at:
+    platform_allow:
+      - nrf54lm20dk/nrf54lm20a/cpuapp
+    tags: [firefly, hardware, modem, cellular, power, portable]
+    harness: ztest
+    timeout: 240
+    extra_configs:
+      - CONFIG_FIREFLY_MODEM_TEST_EG800Z=y
+      - CONFIG_MODEM=n
+      - CONFIG_NETWORKING=n
