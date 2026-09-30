@@ -16,11 +16,11 @@ patches:
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: c27bcb771ef0aadf4d879fc4108ce9cf5becc84661612fb781f0eab0ff6556cf
+    sha256sum: 3a5019429ef0c1633381b1031a372241ed4e75d44cd05348b1b5e0d97494506b
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
-    date: 2026-09-29
+    date: 2026-09-30
     upstreamable: true
     comments: |
       Adds a Zephyr modem_cellular vendor driver for the Fibocom LE270
@@ -36,3 +36,20 @@ patches:
       new driver into drivers/modem/vendor_modem_cellular/CMakeLists.txt and
       adds DT_HAS_FIBOCOM_LE270_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
+
+      2026-09-30 update (first real-hardware test): AT+CMEE=1 in the init
+      script got a plain ERROR from the module right after AT+CFUN=4
+      (203ms round-trip vs ~6ms for the preceding query - suspected CFUN
+      state-transition timing quirk), and modem_cellular's abort_matches
+      treats any ERROR as fatal for the whole init script, so CMUX/PPP
+      never started. Removed AT+CMEE=1 (a diagnostic nicety only - does not
+      affect error *detection*, just verbose vs terse error codes) and
+      added a 300ms settle delay after AT+CFUN=4. Also removed AT+CIMI
+      (manual: the only one of the five identity queries requiring
+      RequireSIMCardNormal=Yes, same abort risk if the SIM isn't ready yet;
+      nothing reads CELLULAR_MODEM_INFO_SIM_IMSI). Raised the dial script
+      timeout 10s->90s and periodic script timeout 4s->15s: both are a
+      single whole-script watchdog (confirmed against modem_chat.c, not
+      per-step), and the manual's own documented MaxResponseDuration
+      figures for AT+CGACT/AT+CFUN=1/AT+CEREG?/AT+CSQ already summed past
+      the old budgets on paper.

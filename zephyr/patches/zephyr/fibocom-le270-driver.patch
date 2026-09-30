@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..700b60573e8
+index 00000000000..c9aa0326af8
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,144 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -50,14 +50,30 @@ index 00000000000..700b60573e8
 +	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMEE=1", ok_match),
++	/* Real hardware: AT+CFUN=4 ("flight mode" per AT Commands User Manual
++	 * V1.6 sec 4.13 - CFUN=0, not CFUN=4, is "minimum functionality")
++	 * returned OK in 203ms vs ~6ms for the AT+CFUN? read just before it,
++	 * and the next command (AT+CMEE=1) sent right after got a plain
++	 * ERROR back in ~5ms, aborting the whole init script. Settle here
++	 * instead of racing straight into AT+CEREG=1 below. */
++	MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 300),
++	/* AT+CMEE=1 removed: it was the exact command that hit the ERROR
++	 * above on real hardware, and it only chooses verbose vs numeric
++	 * +CME ERROR codes on error responses - abort_matches still aborts
++	 * on a plain "ERROR" either way, so dropping it changes no error
++	 * detection. */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=1", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGSN", imei_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMM", cgmm_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMI", cgmi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMR", cgmr_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CIMI", cimi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	/* AT+CIMI removed: manual sec 3.10 (p.29) marks it the only one of
++	 * the five identity commands requiring RequireSIMCardNormal=Yes, and
++	 * documents its failure as a plain "ERROR" - the same zero-tolerance
++	 * abort_matches hit AT+CMEE=1 caused above, if the SIM isn't fully
++	 * ready yet (this script has no AT+CPIN? gate). Nothing reads
++	 * CELLULAR_MODEM_INFO_SIM_IMSI today, so dropping it costs nothing. */
 +	/* Fibocom LE Series AT Commands User Manual V1.6 section 4.16: up to
 +	 * 3 channels of CMUX multiplexing, basic mode, UIH frames only,
 +	 * 115200 bps (port_speed=5), matching this UART's current-speed and
@@ -81,16 +97,28 @@ index 00000000000..700b60573e8
 +			       * that MODEM_CELLULAR configures. */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("ATD*99***1#", connect_match));
 +
++/* Timeout raised from the eg800q template's 10s: modem_chat_script_start()
++ * schedules this as a single whole-script watchdog (never reset per step),
++ * and the manual's own documented MaxResponseDuration for this script's
++ * steps already sums past 10s on paper (AT+CGACT 50000ms + AT+CFUN=1
++ * 25000ms + the 500ms settle + ATD*99***1# 3000ms = ~78.5s worst case) -
++ * the same "whole script dies, CMUX/PPP never starts" failure as the
++ * AT+CMEE=1 abort, just via TIMEOUT instead of ABORT. 90s covers the
++ * documented worst case with margin; real steps run in milliseconds. */
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_dial_chat_script, fibocom_le270_dial_chat_script_cmds,
-+			 dial_abort_matches, modem_cellular_chat_callback_handler, 10);
++			 dial_abort_matches, modem_cellular_chat_callback_handler, 90);
 +
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_periodic_chat_script_cmds,
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CSQ", csq_match));
 +
++/* Timeout raised from the eg800q template's 4s (same single whole-script
++ * watchdog as the dial script above): the manual documents
++ * MaxResponseDuration=5000ms for both AT+CEREG? and AT+CSQ, 10s combined
++ * worst case, already exceeding the old 4s budget on paper. */
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_periodic_chat_script,
 +			 fibocom_le270_periodic_chat_script_cmds, abort_matches,
-+			 modem_cellular_chat_callback_handler, 4);
++			 modem_cellular_chat_callback_handler, 15);
 +
 +static const struct modem_cellular_vendor_config fibocom_le270_vendor = {
 +	/* clang-format off */
