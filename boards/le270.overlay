@@ -2,15 +2,25 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Fibocom LE270 modem wired externally to this DK, on uart21 (SoC PERI
- * domain, P1) - the same physical UART/PWRKEY pins boards/eg800z.overlay
+ * domain, P1) - the same physical TXD/RXD/PWRKEY pins boards/eg800z.overlay
  * uses, since only one external modem is ever populated on the DK at a
  * time:
  *
  *   TXD     - P1.13 (SoC output -> modem MAIN_RXD)
  *   RXD     - P1.14 (SoC input  <- modem MAIN_TXD)
- *   RTS     - P1.11 (SoC output -> modem MAIN_CTS)
- *   CTS     - P1.12 (SoC input  <- modem MAIN_RTS)
  *   PWRKEY   - P0.00 (gpio0, active-low)
+ *
+ * No RTS/CTS: on real hardware (this project's Fibocom LE270 ADP), enabling
+ * hw-flow-control here left the async HWFC backend permanently unable to
+ * transmit ("Transmit aborted (0 sent)", repeating) - the nRF UARTE with
+ * HWFC enabled will not send a byte until it sees its own CTS input
+ * asserted, and that never happened, even though the modem's own boot
+ * banners (^boot.rom'v, AT command ready, +SIM READY) arrived on RX just
+ * fine. Root cause not confirmed (ADP-specific RTS/CTS routing is already
+ * atypical here - see the RESET_N/DTR note below), but plain 2-wire
+ * TX/RX with no flow control unblocks it: the driver never sends AT+IFC to
+ * put the module into hardware-flow-control mode, so its default boot
+ * state already expects none.
  *
  * RESET_N and MAIN_DTR are NOT wired here: on the Fibocom LE270 ADP
  * (development board), both are only exposed as onboard physical
@@ -45,13 +55,11 @@
 &pinctrl {
 	uart21_default_le270: uart21_default_le270 {
 		group1 {
-			psels = <NRF_PSEL(UART_TX, 1, 13)>,
-				<NRF_PSEL(UART_RTS, 1, 11)>;
+			psels = <NRF_PSEL(UART_TX, 1, 13)>;
 		};
 
 		group2 {
-			psels = <NRF_PSEL(UART_RX, 1, 14)>,
-				<NRF_PSEL(UART_CTS, 1, 12)>;
+			psels = <NRF_PSEL(UART_RX, 1, 14)>;
 			bias-pull-up;
 		};
 	};
@@ -59,9 +67,7 @@
 	uart21_sleep_le270: uart21_sleep_le270 {
 		group1 {
 			psels = <NRF_PSEL(UART_TX, 1, 13)>,
-				<NRF_PSEL(UART_RX, 1, 14)>,
-				<NRF_PSEL(UART_RTS, 1, 11)>,
-				<NRF_PSEL(UART_CTS, 1, 12)>;
+				<NRF_PSEL(UART_RX, 1, 14)>;
 			low-power-enable;
 		};
 	};
@@ -73,7 +79,6 @@
 	pinctrl-1 = <&uart21_sleep_le270>;
 	pinctrl-names = "default", "sleep";
 	current-speed = <115200>;
-	hw-flow-control;
 	zephyr,pm-device-runtime-auto;
 
 	modem: modem {
