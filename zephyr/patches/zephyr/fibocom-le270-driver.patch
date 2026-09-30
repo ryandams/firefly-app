@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..c9aa0326af8
+index 00000000000..7acd3f61945
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,200 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -76,10 +76,56 @@ index 00000000000..c9aa0326af8
 +	 * CELLULAR_MODEM_INFO_SIM_IMSI today, so dropping it costs nothing. */
 +	/* Fibocom LE Series AT Commands User Manual V1.6 section 4.16: up to
 +	 * 3 channels of CMUX multiplexing, basic mode, UIH frames only,
-+	 * 115200 bps (port_speed=5), matching this UART's current-speed and
-+	 * the 127-byte DLCI MTU MODEM_CELLULAR selects for this driver (see
-+	 * Kconfig.cellular). */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
++	 * 115200 bps (port_speed=5), matching this UART's current speed.
++	 *
++	 * The original 4-parameter form "AT+CMUX=0,0,5,127" (port_speed=5
++	 * plus N1=127 sized to Kconfig.cellular's MODEM_CMUX_DEFAULT_MTU_127
++	 * for this driver) hit a real-hardware abort: a fast (~5.4ms), clean
++	 * ERROR - the same immediate, well-formed-rejection signature as the
++	 * AT+CMEE=1/AT+CIMI aborts already removed above, not a timeout or
++	 * garbled response. Every individual parameter was already confirmed
++	 * in-range against this manual's own "AT+CMUX=? ->
++	 * (0),(0),(1-8),(1-1509),..." query response, so this isn't an
++	 * out-of-range value. Re-reading section 4.16 (pp.53-56) itself: its
++	 * Description states "if the parameters are left out, the default
++	 * value is used", and the section's only worked SET example is the
++	 * 3-parameter "AT+CMUX=0,0,1 -> OK" (mode, subset, port_speed only) -
++	 * a 4-parameter invocation is never actually demonstrated. Dropped N1
++	 * here to match the manual's only proven-working shape; port_speed=5
++	 * is kept (the manual's own example uses port_speed=1/9600, which
++	 * would silently downgrade this UART's baud rate - not wanted). N1
++	 * then defaults to 31 per the manual's READ example ("AT+CMUX? ->
++	 * +CMUX: 0,0,5,31,10,3,30,10,2"): this only shrinks the on-the-wire
++	 * CMUX frame size the modem uses, it does not change
++	 * MODEM_CMUX_DEFAULT_MTU_127, which sizes Zephyr's own local CMUX
++	 * buffers independently - a modem using smaller-than-buffer frames is
++	 * safe, just less efficient than the originally-intended 127-byte
++	 * frames.
++	 *
++	 * Diagnostic only, not a fix: the sibling cellular_quectel_eg800z.c
++	 * driver hit this exact same fast-clean-ERROR signature on the exact
++	 * same command, and its real root cause turned out to be "AT+CMUX
++	 * does not exist on this firmware at all" (absent from that module's
++	 * manual entirely) - not a parameter problem. The LE270's manual DOES
++	 * fully document AT+CMUX (mode/subset/port_speed/N1 table, a read
++	 * form, and a query form), unlike the EG800Z, so that worst case is
++	 * less likely here - but it can't be ruled out from documentation
++	 * alone, and this is a different firmware build
++	 * (12007.7000.00.04.37.03) than whatever the manual was written
++	 * against. AT+CMUX=? is always side-effect-free per the manual's own
++	 * characteristics table (no state changes, no prerequisites) and its
++	 * response - "+CMUX: (0),(0),(1-8),(1-1509),..." - lands in the DBG
++	 * log via modem_chat_on_unknown_command_received the same way the
++	 * AT+CFUN?/AT+CEREG? read commands' info lines already do. If the
++	 * next real-hardware run still ends in ERROR on the line below, this
++	 * query's response (or its own ERROR) settles which explanation is
++	 * right without another guess-and-reflash round: a normal
++	 * "+CMUX: (...)" answer here means the module claims support and the
++	 * parameter shape needs more work; an ERROR here means the EG800Z
++	 * story is repeating and this modem needs the same non-CMUX
++	 * architectural path modemEg800zPpp.cpp already uses for that one. */
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=?", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5", ok_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
 +			 abort_matches, modem_cellular_chat_callback_handler, 30);
@@ -150,10 +196,20 @@ index 00000000000..c9aa0326af8
 +	/* RESET_N held low for >=100ms per section 4.3; doubled for margin. */
 +	.reset_pulse_duration_ms = 200,
 +	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing
-+	 * diagrams are) - a starting point to tune against real hardware,
-+	 * following the same margin the EG800Z entry uses for its own
-+	 * undocumented startup time. */
-+	.startup_time_ms = 15000,
++	 * diagrams are). Was 15000ms as an untested placeholder ("a starting
++	 * point to tune against real hardware", following the EG800Z entry's
++	 * own undocumented-startup margin) - this IS that tuning, now backed
++	 * by data: the real hardware log shows the very first "AT" sent once
++	 * RUN_INIT_SCRIPT begins already gets a clean OK back in ~4.5ms, so
++	 * the modem's AT interface is up well before a 15s wait completes.
++	 * Dropped to 2000ms - several orders of magnitude of margin above the
++	 * one observed sample (this is a single boot, not a characterized
++	 * worst case), and in line with cellular_sqn_gm02s.c's 2000ms for a
++	 * modem with similarly undocumented startup timing, rather than the
++	 * 10000-30000ms entries elsewhere in this file's siblings that are
++	 * sized for modems with documented multi-second boot times this
++	 * driver hasn't shown it needs. */
++	.startup_time_ms = 2000,
 +	.shutdown_time_ms = 10000,
 +};
 +

@@ -16,7 +16,7 @@ patches:
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 3a5019429ef0c1633381b1031a372241ed4e75d44cd05348b1b5e0d97494506b
+    sha256sum: 2d425ae7245ffc37da0de5f0912602dfe0e5a17cc35756867c3b9e8e3e9f3fdd
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -53,3 +53,42 @@ patches:
       per-step), and the manual's own documented MaxResponseDuration
       figures for AT+CGACT/AT+CFUN=1/AT+CEREG?/AT+CSQ already summed past
       the old budgets on paper.
+
+      2026-09-30 update (second real-hardware test): the init script now got
+      past AT+CGMR and hit a new abort at the very last step, AT+CMUX=0,0,5,127
+      -> ERROR in ~5.4ms (same fast, clean-rejection signature as the
+      AT+CMEE=1/AT+CIMI aborts above). Three independent investigations
+      re-read AT Commands User Manual V1.6 section 4.16 (pp.53-56) and
+      converged on the same finding: the manual's Description states "if the
+      parameters are left out, the default value is used", and its only
+      worked SET example is the 3-parameter "AT+CMUX=0,0,1 -> OK" - a
+      4-parameter invocation (mode,subset,port_speed,N1) is never actually
+      demonstrated. Dropped N1 from the init script's AT+CMUX command
+      (now "AT+CMUX=0,0,5", keeping port_speed=5/115200 baud, letting N1
+      default to 31 per the manual's own READ example
+      "+CMUX: 0,0,5,31,10,3,30,10,2"); this only affects the on-the-wire CMUX
+      frame size, not Kconfig.cellular's MODEM_CMUX_DEFAULT_MTU_127 which
+      sizes Zephyr's own local CMUX buffers independently. Also reduced
+      startup_time_ms 15000ms->2000ms: the real hardware log shows the
+      init script's first "AT" already getting a clean OK in ~4.5ms once
+      RUN_INIT_SCRIPT begins, so the old value was an untested placeholder
+      far larger than needed; 2000ms keeps several orders of magnitude of
+      margin above the one observed sample.
+
+      Caveat surfaced by an adversarial review of the above: the sibling
+      cellular_quectel_eg800z.c driver hit this exact fast-clean-ERROR
+      signature on this exact command, and its real root cause was "AT+CMUX
+      does not exist on that firmware at all" - not a parameter problem.
+      Unlike the EG800Z, the LE270's manual fully documents AT+CMUX (a
+      parameter table, a read form, and a query form), so that worst case
+      is less likely here, but it isn't ruled out - this is a different
+      firmware build (12007.7000.00.04.37.03) than whatever the manual was
+      written against, and this exact firmware already disagreed with its
+      own manual twice (AT+CMEE=1, AT+CIMI). Added a diagnostic-only
+      AT+CMUX=? query immediately before the real AT+CMUX=0,0,5 command:
+      always side-effect-free per the manual, and its response settles
+      which story is true on the very next hardware run without another
+      guess - a normal "+CMUX: (...)" answer means the module claims
+      support and the parameter shape needs more work; an ERROR there means
+      this modem needs the same non-CMUX architectural path
+      modemEg800zPpp.cpp already uses for the EG800Z.
