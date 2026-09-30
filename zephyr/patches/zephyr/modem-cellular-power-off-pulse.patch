@@ -1,0 +1,38 @@
+diff --git a/drivers/modem/modem_cellular.c b/drivers/modem/modem_cellular.c
+index 49db4240526..3fb4593dda8 100644
+--- a/drivers/modem/modem_cellular.c
++++ b/drivers/modem/modem_cellular.c
+@@ -1597,10 +1597,13 @@ static int modem_cellular_on_run_shutdown_script_state_leave(struct modem_cellul
+ static int modem_cellular_on_power_off_pulse_state_enter(struct modem_cellular_data *data)
+ {
+ 	const struct modem_cellular_config *config = data->dev->config;
++	const uint16_t pulse_ms = (config->vendor->power_off_pulse_duration_ms != 0)
++					   ? config->vendor->power_off_pulse_duration_ms
++					   : config->vendor->power_pulse_duration_ms;
+ 
+ 	data->cmd_pipe = NULL;
+ 	gpio_pin_set_dt(&config->power_gpio, 1);
+-	modem_cellular_start_timer(data, K_MSEC(config->vendor->power_pulse_duration_ms));
++	modem_cellular_start_timer(data, K_MSEC(pulse_ms));
+ 	return 0;
+ }
+ 
+diff --git a/include/zephyr/drivers/modem/modem_cellular.h b/include/zephyr/drivers/modem/modem_cellular.h
+index f1444b390c5..e44f7ad4eb3 100644
+--- a/include/zephyr/drivers/modem/modem_cellular.h
++++ b/include/zephyr/drivers/modem/modem_cellular.h
+@@ -221,6 +221,14 @@ struct modem_cellular_vendor_config {
+ 		uint16_t size;
+ 	} unsol_matches;
+ 	uint16_t power_pulse_duration_ms;
++	/* Power-off PWRKEY pulse duration, if it differs from the power-on
++	 * pulse above (0 means "same as power_pulse_duration_ms" - every
++	 * existing vendor driver leaves this at 0 and is unaffected). Added
++	 * because some modems document different minimum pulse widths for
++	 * power-on vs power-off (e.g. >=650ms on vs >=3.1s off), which a
++	 * single shared duration can't satisfy without either an
++	 * unnecessarily long power-on pulse or a too-short power-off one. */
++	uint16_t power_off_pulse_duration_ms;
+ 	uint16_t reset_pulse_duration_ms;
+ 	uint16_t startup_time_ms;
+ 	uint16_t shutdown_time_ms;

@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..7acd3f61945
+index 00000000000..7e7ff049b4f
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,212 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -177,9 +177,10 @@ index 00000000000..7acd3f61945
 +		 * V2.2 documents AT+CPWROFF returning a plain OK with no
 +		 * completion URC, and separately documents hardware power-off
 +		 * via a >=3.1s PWRKEY pulse as an equally valid method (section
-+		 * 4.2). power_pulse_duration_ms below is sized to satisfy that
-+		 * pulse directly, so RUN_SHUTDOWN_SCRIPT's power_pulse fallback
-+		 * alone is sufficient - same pattern as cellular_quectel_eg800q.c.
++		 * 4.2). power_off_pulse_duration_ms below is sized to satisfy
++		 * that pulse directly, so RUN_SHUTDOWN_SCRIPT's power_pulse
++		 * fallback alone is sufficient - same pattern as
++		 * cellular_quectel_eg800q.c.
 +		 */
 +	},
 +	.unsol_matches = {
@@ -188,11 +189,22 @@ index 00000000000..7acd3f61945
 +	},
 +	/* clang-format on */
 +	/* Hardware Guide V2.2 section 4.2: power on needs PWRKEY pulled low
-+	 * for >=650ms; hardware power off needs >=3.1s (3100ms). The
-+	 * framework only supports one pulse duration for both directions, so
-+	 * this uses the larger value - a longer-than-minimum power-on pulse
-+	 * is harmless. */
-+	.power_pulse_duration_ms = 3100,
++	 * for >=650ms; hardware power off needs >=3.1s (3100ms) - too far
++	 * apart to share one duration without either a wastefully long
++	 * power-on pulse or a too-short power-off one (the latter risking an
++	 * incomplete shutdown every round, since this modem has no .shutdown
++	 * script to confirm power-off any other way). modem_cellular.h grew
++	 * a separate power_off_pulse_duration_ms field for exactly this split
++	 * (falls back to power_pulse_duration_ms when left at 0, so every
++	 * other vendor driver is unaffected) - see
++	 * zephyr/patches/zephyr/fibocom-le270-driver.patch. 700ms keeps
++	 * ~50ms margin above the documented 650ms power-on minimum without
++	 * needlessly extending how long the UART pipe stays unattached (see
++	 * the AWAIT_POWER_ON note on startup_time_ms below - the modem starts
++	 * transmitting almost immediately after PWRKEY drops, so a shorter
++	 * pulse means less of its early output is missed). */
++	.power_pulse_duration_ms = 700,
++	.power_off_pulse_duration_ms = 3100,
 +	/* RESET_N held low for >=100ms per section 4.3; doubled for margin. */
 +	.reset_pulse_duration_ms = 200,
 +	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing

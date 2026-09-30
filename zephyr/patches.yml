@@ -15,8 +15,27 @@ patches:
       drivers/modem/vendor_modem_cellular/CMakeLists.txt and adds
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
+  - path: zephyr/modem-cellular-power-off-pulse.patch
+    sha256sum: 2093327c0eeaa5e4958e22328470d120e24c2457e817cc50a9ab48eaf16c3a37
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-09-30
+    upstreamable: true
+    comments: |
+      Adds struct modem_cellular_vendor_config::power_off_pulse_duration_ms,
+      used by modem_cellular_on_power_off_pulse_state_enter() when non-zero
+      instead of the existing power_pulse_duration_ms (which stays the
+      fallback, so every other vendor driver is unaffected - they all leave
+      the new field at its zero default). Some modems document meaningfully
+      different minimum PWRKEY pulse widths for power-on vs power-off (the
+      Fibocom LE270: >=650ms on, >=3.1s off) that a single shared duration
+      can't satisfy without either an unnecessarily long power-on pulse or a
+      too-short, unreliable power-off one - see
+      cellular_fibocom_le270.c's use of the new field in
+      fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 2d425ae7245ffc37da0de5f0912602dfe0e5a17cc35756867c3b9e8e3e9f3fdd
+    sha256sum: 253d15bfa46a67d07fbaf22738ec3cf00f12ea41a446c1931bb9d7e4df14e29f
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -92,3 +111,13 @@ patches:
       support and the parameter shape needs more work; an ERROR there means
       this modem needs the same non-CMUX architectural path
       modemEg800zPpp.cpp already uses for the EG800Z.
+
+      2026-09-30 update (power pulse split + AT shell): switched
+      power_pulse_duration_ms to 700ms (power-on only, ~50ms margin above
+      the documented 650ms minimum) and added
+      power_off_pulse_duration_ms=3100 (see
+      zephyr/modem-cellular-power-off-pulse.patch) now that the framework
+      supports both independently - previously both directions shared the
+      3100ms power-off value, needlessly extending how long the UART pipe
+      stays unattached during every power-on (see the AWAIT_POWER_ON/
+      startup_time_ms comment in the driver for why that window matters).
