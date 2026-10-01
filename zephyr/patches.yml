@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 8443715f44247fb930ece8df40c72a452fe8e671aa73c7d1967f55a500341f7b
+    sha256sum: bf0b53f16d687767e9f8073723bd6cafc61bc0913579c6d23845e1340b7151fe
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -139,3 +139,20 @@ patches:
       driver is built around) early in the init script, so that any future
       ERROR - AT+CMUX in particular - hopefully reports a detailed +CME
       ERROR reason instead of a bare ERROR.
+
+      2026-10-01 update (fourth real-hardware test): CFUN state is now ruled
+      out conclusively - with AT+CFUN=4 removed, this run's AT+CEREG? showed
+      "+CEREG: 1,5" (registered, roaming) while still in the module's
+      default CFUN=1, and AT+CMUX=? still failed with the identical clean
+      ERROR regardless. AT+CMEE=2 (added last update) also failed the same
+      way. That makes five different documented-as-valid commands
+      (AT+CMEE=1, AT+CMEE=2, AT+CIMI, AT+CMUX 4-param, AT+CMUX query) all
+      rejected identically by this firmware, across every state tried -
+      strong evidence this firmware build simply does not implement
+      AT+CMUX, same as the sibling EG800Z. One gap remained: every run so
+      far aborted on AT+CMUX=? before ever reaching the actual
+      AT+CMUX=0,0,5 setting command, so there was still no direct evidence
+      on that exact form specifically. Made both CMUX lines temporarily
+      allow_match instead of ok_match for one more diagnostic run, to let
+      the script complete and surface that one remaining data point either
+      way.

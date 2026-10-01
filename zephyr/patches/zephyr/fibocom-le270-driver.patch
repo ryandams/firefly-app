@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..a6499484c90
+index 00000000000..232a7a784bb
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,262 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -148,9 +148,34 @@ index 00000000000..a6499484c90
 +	 * "+CMUX: (...)" answer here means the module claims support and the
 +	 * parameter shape needs more work; an ERROR here means the EG800Z
 +	 * story is repeating and this modem needs the same non-CMUX
-+	 * architectural path modemEg800zPpp.cpp already uses for that one. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=?", ok_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5", ok_match));
++	 * architectural path modemEg800zPpp.cpp already uses for that one.
++	 *
++	 * It did: AT+CMUX=? itself failed with the same clean ERROR, and a
++	 * separate real-hardware run ruled out CFUN state as the explanation
++	 * (AT+CFUN=4 removed entirely for that test - the module registered
++	 * to the network, "+CEREG: 1,5", while still in its default CFUN=1,
++	 * and AT+CMUX=? failed identically anyway). Combined with AT+CMEE=1,
++	 * AT+CMEE=2, and AT+CIMI all failing the same way, this firmware has
++	 * now disagreed with its own manual on five different documented
++	 * commands - strong, multi-angle evidence this specific firmware
++	 * build simply does not implement AT+CMUX, the same conclusion
++	 * already reached for the sibling EG800Z.
++	 *
++	 * Both CMUX lines below are temporarily allow_match (not ok_match)
++	 * for exactly one more diagnostic run: every real-hardware attempt so
++	 * far aborted on AT+CMUX=? before ever reaching the actual
++	 * AT+CMUX=0,0,5 setting command, so there is still no direct evidence
++	 * on whether that exact form independently succeeds or fails. Making
++	 * both non-fatal lets the script run to completion regardless, and
++	 * surfaces that one remaining data point. If AT+CMUX=0,0,5 also
++	 * errors, that closes out the CMUX investigation - revert the
++	 * .init script's final chat matches back to ok_match once confirmed
++	 * one way or the other, since a script that "succeeds" with AT+CMUX
++	 * actually rejected just moves the failure later, into
++	 * MODEM_CELLULAR_STATE_CONNECT_CMUX's own SABM/UA handshake timeout,
++	 * which is a less direct signal than this script simply aborting. */
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMUX=?", allow_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMUX=0,0,5", allow_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
 +			 abort_matches, modem_cellular_chat_callback_handler, 30);
