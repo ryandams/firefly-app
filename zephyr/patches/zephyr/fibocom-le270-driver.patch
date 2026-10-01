@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..7e7ff049b4f
+index 00000000000..a6499484c90
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,237 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -48,20 +48,45 @@ index 00000000000..7e7ff049b4f
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(
 +	fibocom_le270_init_chat_script_cmds, MODEM_CHAT_SCRIPT_CMD_RESP("AT", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
++	/* AT+CMEE=2: "detailed" (string) +CME ERROR values instead of bare
++	 * ERROR, per AT Commands User Manual V1.6 sec 13.1.1 - so any command
++	 * that fails from here on (AT+CMUX below, in particular) hopefully
++	 * reports *why* instead of a bare ERROR. Non-fatal on purpose
++	 * (allow_match: OK or ERROR both continue the script) rather than
++	 * ok_match: AT+CMEE=1 was literally the command this driver's own
++	 * history shows aborting the whole init script on real hardware (see
++	 * the removed-command note further down) - if AT+CMEE=2 hits the same
++	 * fate, losing verbose errors is a fine trade for not losing the rest
++	 * of init again. */
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMEE=2", allow_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
-+	/* Real hardware: AT+CFUN=4 ("flight mode" per AT Commands User Manual
-+	 * V1.6 sec 4.13 - CFUN=0, not CFUN=4, is "minimum functionality")
-+	 * returned OK in 203ms vs ~6ms for the AT+CFUN? read just before it,
-+	 * and the next command (AT+CMEE=1) sent right after got a plain
-+	 * ERROR back in ~5ms, aborting the whole init script. Settle here
-+	 * instead of racing straight into AT+CEREG=1 below. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 300),
-+	/* AT+CMEE=1 removed: it was the exact command that hit the ERROR
-+	 * above on real hardware, and it only chooses verbose vs numeric
-+	 * +CME ERROR codes on error responses - abort_matches still aborts
-+	 * on a plain "ERROR" either way, so dropping it changes no error
-+	 * detection. */
++	/* AT+CFUN=4 ("flight mode" per AT Commands User Manual V1.6 sec 4.13 -
++	 * CFUN=0, not CFUN=4, is "minimum functionality") used to be forced
++	 * here to keep the radio off during the identity queries below. Two
++	 * things argued for removing it as an experiment rather than a
++	 * two-line settle-delay patch over it:
++	 *  1. It was never free: real hardware measured it at 203ms to return
++	 *     OK, vs ~6ms for the AT+CFUN? read just above, and the very next
++	 *     command sent right after (AT+CMEE=1, since removed) got a plain
++	 *     ERROR in ~5ms - a real state-transition cost, not a no-op.
++	 *  2. AT+CFUN? above already shows this module boots in CFUN=1 (full
++	 *     functionality) on its own, by default - we were the ones
++	 *     forcing a transition away from that, at the one real cost measured
++	 *     in (1), to save a modest amount of RF power during a
++	 *     fairly short init sequence.
++	 * This is also a live experiment: AT+CMUX has since failed with a
++	 * clean ERROR in every form tried (4-param, 3-param, the bare
++	 * capability query) while always issued from CFUN=4 - never yet tried
++	 * from this module's own default CFUN=1. The manual's own
++	 * characteristics table for +CMUX says no functionality-mode
++	 * prerequisite exists, but this exact firmware has already disagreed
++	 * with its own manual more than once (AT+CMEE=1, AT+CIMI), so this is
++	 * worth ruling in or out on real hardware rather than from
++	 * documentation alone. If AT+CMUX still fails with CFUN=4 gone, that
++	 * rules CFUN state out entirely as a contributing factor; if it
++	 * succeeds, CFUN=4 was the whole story and the radio simply needs to
++	 * stay enabled through init (losing the power saving CFUN=4 offered
++	 * is the trade-off worth confirming before accepting it back). */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=1", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGSN", imei_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),

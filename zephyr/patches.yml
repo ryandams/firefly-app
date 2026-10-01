@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 253d15bfa46a67d07fbaf22738ec3cf00f12ea41a446c1931bb9d7e4df14e29f
+    sha256sum: 8443715f44247fb930ece8df40c72a452fe8e671aa73c7d1967f55a500341f7b
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -121,3 +121,21 @@ patches:
       3100ms power-off value, needlessly extending how long the UART pipe
       stays unattached during every power-on (see the AWAIT_POWER_ON/
       startup_time_ms comment in the driver for why that window matters).
+
+      2026-10-01 update (third real-hardware test): AT+CMUX=? (the pure
+      capability query, not just the setting command) now also fails with
+      the same fast, clean ERROR - a query can't be "out of order" with
+      anything, since it changes no state, which rules out a CFUN/sequencing
+      explanation on its own. Still, since this exact firmware has already
+      diverged from its own manual multiple times, removed the forced
+      AT+CFUN=4 ("flight mode") step as a live experiment rather than
+      assuming the manual's "no prerequisite" claim holds here too: the
+      module's own AT+CFUN? already shows it boots in CFUN=1 (full
+      functionality) by default, and forcing CFUN=4 measured a real 203ms
+      cost on real hardware, so this both tests the CFUN hypothesis and
+      removes dead weight either way. Also added a non-fatal AT+CMEE=2
+      (MODEM_CHAT_SCRIPT_CMD_RESP_MULT with allow_match, not ok_match - the
+      =1 form of this exact command is what caused the original abort this
+      driver is built around) early in the init script, so that any future
+      ERROR - AT+CMUX in particular - hopefully reports a detailed +CME
+      ERROR reason instead of a bare ERROR.
