@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..4feeb1142ff
+index 00000000000..6755e333e55
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,234 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -53,7 +53,7 @@ index 00000000000..4feeb1142ff
 +	/* Real hardware: AT+CFUN=4 ("flight mode" per AT Commands User Manual
 +	 * V1.6 sec 4.13 - CFUN=0, not CFUN=4, is "minimum functionality")
 +	 * returned OK in 203ms vs ~6ms for the AT+CFUN? read just before it.
-+	 * Settle here instead of racing straight into AT+CEREG=1 below. */
++	 * Settle here instead of racing straight into AT+CEREG? below. */
 +	MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 300),
 +	/* AT+CMEE deliberately NOT set anywhere in this driver (stays at the
 +	 * module's own default, CMEE=0 - plain "ERROR" on failure, no
@@ -70,7 +70,38 @@ index 00000000000..4feeb1142ff
 +	 * is needed again for debugging, capture it with the `modem at`
 +	 * shell command instead of changing this script's error reporting
 +	 * mode (see conf/modem_le270.conf / CONFIG_MODEM_AT_SHELL). */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=1", ok_match),
++	/* AT+CEREG=1 (unsolicited registration URCs) deliberately NOT sent:
++	 * real hardware shows this module broadcasts every +CEREG: URC
++	 * identically on ALL THREE open CMUX DLCIs at once (confirmed in raw
++	 * frame captures - the same bytes arrive on ch:1, ch:2, AND ch:3
++	 * within the same few milliseconds), not just the one DLCI the AT
++	 * session is attached to. Right as modem_cellular hands DLCI2 over
++	 * to PPP after a successful dial (RUN_DIAL_SCRIPT's SCRIPT_SUCCESS
++	 * handler), this flood of duplicated URCs races the handover: if a
++	 * stale "searching" (+CEREG: 2) sample gets parsed by
++	 * modem_cellular_chat_on_cxreg() after a "registered" (+CEREG: 5)
++	 * one purely due to the duplication, modem_cellular_is_registered()
++	 * flips to false, MODEM_CELLULAR_EVENT_DEREGISTERED fires, and -
++	 * since this driver has no separate .network script - the state
++	 * machine goes AWAIT_PPP_DEAD -> (after reset_pulse_duration_ms,
++	 * 200ms - matches the real-hardware timing exactly) -> back to
++	 * RUN_DIAL_SCRIPT, reattaching the AT chat parser to DLCI2 while
++	 * PPP is still actively using it for data. From there PPP's own LCP
++	 * retransmissions get fed into modem_chat as garbage ("receive
++	 * buffer overrun", repeating) until the dial script times out,
++	 * retries, and eventually srvNetwork's own 120s timeout ends the
++	 * round - observed end-to-end on real hardware.
++	 *
++	 * Leaving CEREG at the module's own default (0, unsolicited
++	 * reporting off) avoids the duplicated-URC race entirely.
++	 * Registration tracking still works: modem_cellular's periodic
++	 * script (fibocom_le270_periodic_chat_script below, every
++	 * CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS = 2000ms once in
++	 * AWAIT_REGISTERED/REGISTERED) polls AT+CEREG? directly, and a
++	 * queried response - unlike an unsolicited URC - only ever comes
++	 * back on the one channel that asked, so it doesn't suffer this
++	 * duplication. The only cost is detecting a registration change
++	 * within ~2s instead of instantly. */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGSN", imei_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMM", cgmm_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),

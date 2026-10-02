@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: eeb0e7f6b42f16c51214d52ee61ef8df8974f325d10ae548f86f4b643b726949
+    sha256sum: 86659b89b6fb574f52669f7feaab45b64a4e36f373c406733a40b6049b9212b5
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -185,3 +185,35 @@ patches:
       allow_match is supposed to let it. AT+CMEE now stays at the module's
       default (0, plain ERROR) for exactly this reason - see the comment
       in the driver's init script.
+
+      2026-10-02 update (fifth real-hardware test, new firmware): with
+      AT+CMEE reverted, the dial script got all the way to ATD*99***1# ->
+      CONNECT and PPP frames started flowing - real progress - but the
+      round still failed. Root cause: this module broadcasts every
+      +CEREG: unsolicited URC identically on all three open CMUX DLCIs at
+      once (confirmed in raw frame captures - the same bytes arrive on
+      ch:1, ch:2, and ch:3 within milliseconds), not just the DLCI the AT
+      session is attached to. Right as modem_cellular.c's
+      RUN_DIAL_SCRIPT success handler hands DLCI2 over to PPP, this
+      duplicated-URC flood races the handover: a stale "+CEREG: 2"
+      (searching) sample processed after a "+CEREG: 5" (registered) one
+      flips modem_cellular_is_registered() to false, firing
+      MODEM_CELLULAR_EVENT_DEREGISTERED - and since this driver has no
+      separate .network script, the state machine goes AWAIT_PPP_DEAD ->
+      (after reset_pulse_duration_ms, 200ms - matches the real-hardware
+      gap exactly) -> back to RUN_DIAL_SCRIPT, reattaching the AT chat
+      parser to DLCI2 while PPP is still actively using it for data. PPP's
+      own LCP retransmissions then get fed into modem_chat as garbage
+      ("receive buffer overrun", repeating) until the dial script times
+      out, retries, and srvNetwork's own 120s timeout ends the round -
+      traced end-to-end from the real hardware log.
+
+      Fix: removed AT+CEREG=1 (enabling unsolicited registration URCs)
+      from the init script, leaving AT+CEREG? (a one-time direct read)
+      alone. Registration tracking still works - modem_cellular's periodic
+      script (AT+CEREG?/AT+CSQ, every CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS
+      = 2000ms) polls it directly once in AWAIT_REGISTERED/REGISTERED, and
+      a queried response, unlike an unsolicited URC, only ever comes back
+      on the one channel that asked - it doesn't suffer the duplication.
+      The only cost is detecting a registration change within ~2s instead
+      of instantly.
