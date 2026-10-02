@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: bf0b53f16d687767e9f8073723bd6cafc61bc0913579c6d23845e1340b7151fe
+    sha256sum: eeb0e7f6b42f16c51214d52ee61ef8df8974f325d10ae548f86f4b643b726949
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -156,3 +156,32 @@ patches:
       allow_match instead of ok_match for one more diagnostic run, to let
       the script complete and surface that one remaining data point either
       way.
+
+      2026-10-02 update (resolved): the evidence above was sent to a
+      Fibocom FAE, who provided updated firmware. AT+CMUX=? and
+      AT+CMUX=0,0,5 both immediately returned OK, CMUX connected (SABM/UA
+      on channel 0), and DLCI 1/2/3 all opened successfully -
+      AT+CGDCONT/APN setup then succeeded too. Reverted every diagnostic
+      added while chasing this on the old firmware, now that it's no
+      longer needed: restored AT+CFUN=4 (the module's own default CFUN=1
+      was only ever used to test a hypothesis, now ruled out) and its
+      300ms settle delay, removed AT+CMEE=2 entirely, and restored
+      AT+CMUX to its original full 4-parameter form (AT+CMUX=0,0,5,127,
+      N1=127 matching MODEM_CMUX_DEFAULT_MTU_127) with a hard ok_match -
+      now that this firmware actually implements it, a failure here
+      should abort loudly again, not be silently tolerated.
+
+      Removing AT+CMEE=2 also fixed a real, separate problem it was
+      causing: with CMEE=2 active, the module reports failures as
+      "+CME ERROR: <reason>" instead of a bare "ERROR" - a format none of
+      modem_cellular's match tables (abort_matches, allow_match,
+      dial_abort_matches) recognize, since they only match on a literal
+      "ERROR" prefix. This meant the dial script's own expected-to-fail
+      AT+CGACT=0,1 step (deactivate context 1 before dialing - this
+      network answers "+CME ERROR: ue busy" or "+CME ERROR: Last PDN
+      disconnection not allowed", never OK) stopped being recognized as
+      either success or failure, so the script just sat until its own 90s
+      timeout instead of moving on to AT+CFUN=1/ATD*99***1# the way
+      allow_match is supposed to let it. AT+CMEE now stays at the module's
+      default (0, plain ERROR) for exactly this reason - see the comment
+      in the driver's init script.

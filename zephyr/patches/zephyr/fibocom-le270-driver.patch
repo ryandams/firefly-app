@@ -27,10 +27,10 @@ index a8b0958af92..bbbd7dd08f1 100644
 
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..232a7a784bb
+index 00000000000..4feeb1142ff
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,203 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -48,50 +48,38 @@ index 00000000000..232a7a784bb
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(
 +	fibocom_le270_init_chat_script_cmds, MODEM_CHAT_SCRIPT_CMD_RESP("AT", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
-+	/* AT+CMEE=2: "detailed" (string) +CME ERROR values instead of bare
-+	 * ERROR, per AT Commands User Manual V1.6 sec 13.1.1 - so any command
-+	 * that fails from here on (AT+CMUX below, in particular) hopefully
-+	 * reports *why* instead of a bare ERROR. Non-fatal on purpose
-+	 * (allow_match: OK or ERROR both continue the script) rather than
-+	 * ok_match: AT+CMEE=1 was literally the command this driver's own
-+	 * history shows aborting the whole init script on real hardware (see
-+	 * the removed-command note further down) - if AT+CMEE=2 hits the same
-+	 * fate, losing verbose errors is a fine trade for not losing the rest
-+	 * of init again. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMEE=2", allow_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
-+	/* AT+CFUN=4 ("flight mode" per AT Commands User Manual V1.6 sec 4.13 -
-+	 * CFUN=0, not CFUN=4, is "minimum functionality") used to be forced
-+	 * here to keep the radio off during the identity queries below. Two
-+	 * things argued for removing it as an experiment rather than a
-+	 * two-line settle-delay patch over it:
-+	 *  1. It was never free: real hardware measured it at 203ms to return
-+	 *     OK, vs ~6ms for the AT+CFUN? read just above, and the very next
-+	 *     command sent right after (AT+CMEE=1, since removed) got a plain
-+	 *     ERROR in ~5ms - a real state-transition cost, not a no-op.
-+	 *  2. AT+CFUN? above already shows this module boots in CFUN=1 (full
-+	 *     functionality) on its own, by default - we were the ones
-+	 *     forcing a transition away from that, at the one real cost measured
-+	 *     in (1), to save a modest amount of RF power during a
-+	 *     fairly short init sequence.
-+	 * This is also a live experiment: AT+CMUX has since failed with a
-+	 * clean ERROR in every form tried (4-param, 3-param, the bare
-+	 * capability query) while always issued from CFUN=4 - never yet tried
-+	 * from this module's own default CFUN=1. The manual's own
-+	 * characteristics table for +CMUX says no functionality-mode
-+	 * prerequisite exists, but this exact firmware has already disagreed
-+	 * with its own manual more than once (AT+CMEE=1, AT+CIMI), so this is
-+	 * worth ruling in or out on real hardware rather than from
-+	 * documentation alone. If AT+CMUX still fails with CFUN=4 gone, that
-+	 * rules CFUN state out entirely as a contributing factor; if it
-+	 * succeeds, CFUN=4 was the whole story and the radio simply needs to
-+	 * stay enabled through init (losing the power saving CFUN=4 offered
-+	 * is the trade-off worth confirming before accepting it back). */
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
++	/* Real hardware: AT+CFUN=4 ("flight mode" per AT Commands User Manual
++	 * V1.6 sec 4.13 - CFUN=0, not CFUN=4, is "minimum functionality")
++	 * returned OK in 203ms vs ~6ms for the AT+CFUN? read just before it.
++	 * Settle here instead of racing straight into AT+CEREG=1 below. */
++	MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 300),
++	/* AT+CMEE deliberately NOT set anywhere in this driver (stays at the
++	 * module's own default, CMEE=0 - plain "ERROR" on failure, no
++	 * "+CME ERROR: <reason>" wrapper). This isn't an oversight: every
++	 * match table modem_cellular's generic framework uses here
++	 * (abort_matches, allow_match, dial_abort_matches) only recognizes a
++	 * bare "ERROR" line - none of them match the "+CME ERROR: ..." prefix
++	 * CMEE=1/2 switches failures to. Tried CMEE=2 for better diagnostics
++	 * during LE270 bring-up and it broke exactly that: AT+CGACT=0,1 in
++	 * the dial script below answering "+CME ERROR: ue busy" went
++	 * unrecognized by allow_match, so the step never advanced and the
++	 * whole dial script sat until its own 90s timeout instead of moving
++	 * on the way allow_match is supposed to let it. If verbose error text
++	 * is needed again for debugging, capture it with the `modem at`
++	 * shell command instead of changing this script's error reporting
++	 * mode (see conf/modem_le270.conf / CONFIG_MODEM_AT_SHELL). */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=1", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGSN", imei_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMM", cgmm_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMI", cgmi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
++	/* AT+CGMR: also doubles as this driver's firmware-version breadcrumb -
++	 * cgmr_match feeds CELLULAR_MODEM_INFO_FW_VERSION, which
++	 * srvNetwork.cpp logs on every connect() ("modem firmware version:
++	 * ..."). Useful for telling hardware apart after a vendor firmware
++	 * update, as happened here (see the CMUX history below). */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMR", cgmr_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
 +	/* AT+CIMI removed: manual sec 3.10 (p.29) marks it the only one of
 +	 * the five identity commands requiring RequireSIMCardNormal=Yes, and
@@ -101,86 +89,39 @@ index 00000000000..232a7a784bb
 +	 * CELLULAR_MODEM_INFO_SIM_IMSI today, so dropping it costs nothing. */
 +	/* Fibocom LE Series AT Commands User Manual V1.6 section 4.16: up to
 +	 * 3 channels of CMUX multiplexing, basic mode, UIH frames only,
-+	 * 115200 bps (port_speed=5), matching this UART's current speed.
++	 * 115200 bps (port_speed=5, matching this UART's current speed), N1=127
++	 * to match Kconfig.cellular's MODEM_CMUX_DEFAULT_MTU_127 for this
++	 * driver.
 +	 *
-+	 * The original 4-parameter form "AT+CMUX=0,0,5,127" (port_speed=5
-+	 * plus N1=127 sized to Kconfig.cellular's MODEM_CMUX_DEFAULT_MTU_127
-+	 * for this driver) hit a real-hardware abort: a fast (~5.4ms), clean
-+	 * ERROR - the same immediate, well-formed-rejection signature as the
-+	 * AT+CMEE=1/AT+CIMI aborts already removed above, not a timeout or
-+	 * garbled response. Every individual parameter was already confirmed
-+	 * in-range against this manual's own "AT+CMUX=? ->
-+	 * (0),(0),(1-8),(1-1509),..." query response, so this isn't an
-+	 * out-of-range value. Re-reading section 4.16 (pp.53-56) itself: its
-+	 * Description states "if the parameters are left out, the default
-+	 * value is used", and the section's only worked SET example is the
-+	 * 3-parameter "AT+CMUX=0,0,1 -> OK" (mode, subset, port_speed only) -
-+	 * a 4-parameter invocation is never actually demonstrated. Dropped N1
-+	 * here to match the manual's only proven-working shape; port_speed=5
-+	 * is kept (the manual's own example uses port_speed=1/9600, which
-+	 * would silently downgrade this UART's baud rate - not wanted). N1
-+	 * then defaults to 31 per the manual's READ example ("AT+CMUX? ->
-+	 * +CMUX: 0,0,5,31,10,3,30,10,2"): this only shrinks the on-the-wire
-+	 * CMUX frame size the modem uses, it does not change
-+	 * MODEM_CMUX_DEFAULT_MTU_127, which sizes Zephyr's own local CMUX
-+	 * buffers independently - a modem using smaller-than-buffer frames is
-+	 * safe, just less efficient than the originally-intended 127-byte
-+	 * frames.
-+	 *
-+	 * Diagnostic only, not a fix: the sibling cellular_quectel_eg800z.c
-+	 * driver hit this exact same fast-clean-ERROR signature on the exact
-+	 * same command, and its real root cause turned out to be "AT+CMUX
-+	 * does not exist on this firmware at all" (absent from that module's
-+	 * manual entirely) - not a parameter problem. The LE270's manual DOES
-+	 * fully document AT+CMUX (mode/subset/port_speed/N1 table, a read
-+	 * form, and a query form), unlike the EG800Z, so that worst case is
-+	 * less likely here - but it can't be ruled out from documentation
-+	 * alone, and this is a different firmware build
-+	 * (12007.7000.00.04.37.03) than whatever the manual was written
-+	 * against. AT+CMUX=? is always side-effect-free per the manual's own
-+	 * characteristics table (no state changes, no prerequisites) and its
-+	 * response - "+CMUX: (0),(0),(1-8),(1-1509),..." - lands in the DBG
-+	 * log via modem_chat_on_unknown_command_received the same way the
-+	 * AT+CFUN?/AT+CEREG? read commands' info lines already do. If the
-+	 * next real-hardware run still ends in ERROR on the line below, this
-+	 * query's response (or its own ERROR) settles which explanation is
-+	 * right without another guess-and-reflash round: a normal
-+	 * "+CMUX: (...)" answer here means the module claims support and the
-+	 * parameter shape needs more work; an ERROR here means the EG800Z
-+	 * story is repeating and this modem needs the same non-CMUX
-+	 * architectural path modemEg800zPpp.cpp already uses for that one.
-+	 *
-+	 * It did: AT+CMUX=? itself failed with the same clean ERROR, and a
-+	 * separate real-hardware run ruled out CFUN state as the explanation
-+	 * (AT+CFUN=4 removed entirely for that test - the module registered
-+	 * to the network, "+CEREG: 1,5", while still in its default CFUN=1,
-+	 * and AT+CMUX=? failed identically anyway). Combined with AT+CMEE=1,
-+	 * AT+CMEE=2, and AT+CIMI all failing the same way, this firmware has
-+	 * now disagreed with its own manual on five different documented
-+	 * commands - strong, multi-angle evidence this specific firmware
-+	 * build simply does not implement AT+CMUX, the same conclusion
-+	 * already reached for the sibling EG800Z.
-+	 *
-+	 * Both CMUX lines below are temporarily allow_match (not ok_match)
-+	 * for exactly one more diagnostic run: every real-hardware attempt so
-+	 * far aborted on AT+CMUX=? before ever reaching the actual
-+	 * AT+CMUX=0,0,5 setting command, so there is still no direct evidence
-+	 * on whether that exact form independently succeeds or fails. Making
-+	 * both non-fatal lets the script run to completion regardless, and
-+	 * surfaces that one remaining data point. If AT+CMUX=0,0,5 also
-+	 * errors, that closes out the CMUX investigation - revert the
-+	 * .init script's final chat matches back to ok_match once confirmed
-+	 * one way or the other, since a script that "succeeds" with AT+CMUX
-+	 * actually rejected just moves the failure later, into
-+	 * MODEM_CELLULAR_STATE_CONNECT_CMUX's own SABM/UA handshake timeout,
-+	 * which is a less direct signal than this script simply aborting. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMUX=?", allow_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CMUX=0,0,5", allow_match));
++	 * History: this exact command (and AT+CMUX=? alone, and AT+CMEE=1,
++	 * AT+CMEE=2, AT+CIMI - five documented-valid commands in total) all
++	 * failed with a fast, clean ERROR on this module's original firmware
++	 * (12007.7000.00.04.37.03), on every CFUN state tried, the same
++	 * "command doesn't actually exist on this firmware" signature
++	 * eventually confirmed for the sibling cellular_quectel_eg800z.c. A
++	 * Fibocom FAE provided updated firmware after being shown this
++	 * evidence, and AT+CMUX (full 4-parameter form, this exact line)
++	 * started working immediately: CMUX connects, DLCI1/2/3 all open,
++	 * AT+CGDCONT succeeds. Kept here, in this form, as the known-good
++	 * command for that firmware - if a module ever reports the older
++	 * firmware version again (see the AT+CGMR comment above), expect
++	 * this exact step to abort the script again. */
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
 +			 abort_matches, modem_cellular_chat_callback_handler, 30);
 +
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_dial_chat_script_cmds,
++			      /* allow_match, not ok_match, on purpose: on this
++			       * network AT+CGACT=0,1 (best-effort "deactivate
++			       * context 1 before dialing, in case it's in a
++			       * stale state") reliably answers ERROR - observed
++			       * both "ue busy" and "Last PDN disconnection not
++			       * allowed" on real hardware - never OK. allow_match
++			       * treats that as expected and moves straight on to
++			       * AT+CFUN=1 below; this only misbehaves if CMEE is
++			       * ever turned on elsewhere (see the AT+CMEE note in
++			       * the init script above for why). */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT=0,1", allow_match),
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
 +			      /* Small delay before dialing, otherwise some
