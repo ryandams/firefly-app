@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..27a22ab2e03
+index 00000000000..2ba46d067da
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,386 @@
+@@ -0,0 +1,412 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -47,7 +47,32 @@ index 00000000000..27a22ab2e03
 +
 +MODEM_CELLULAR_COMMON_CHAT_MATCHES();
 +
-+MODEM_CHAT_MATCHES_DEFINE(fibocom_le270_unsol, MODEM_CELLULAR_COMMON_UNSOL_MATCHES);
++/* Change 4, LE270_driver_optimisation_instructions.md: wake AWAIT_POWER_ON
++ * early on "AT command ready" instead of waiting out the full
++ * startup_time_ms fixed timer below. Reuses modem_cellular's own existing
++ * mechanism for this (modem_cellular_chat_on_modem_ready, already wired to
++ * MODEM_CELLULAR_EVENT_MODEM_READY -> modem_cellular_await_power_on_event
++ * _handler() already stops the timer and proceeds immediately on that
++ * event "as we are ready to proceed" - the same hook the shared
++ * MODEM_CELLULAR_COMMON_UNSOL_MATCHES table uses for other modems' "APP
++ * RDY"/"Ready" URCs) - no framework changes needed, just adding our own
++ * modem's URC text to this vendor driver's own match table, exactly the
++ * "vendor drivers can extend the table with their own vendor-specific
++ * URCs" pattern that macro is designed for.
++ *
++ * "AT command ready" (not "+SIM READY", the instructions document's
++ * primary suggestion) per the document's own "earlier alternative, if the
++ * init script doesn't depend on the SIM" - confirmed true here: every
++ * command in this init script was already audited for SIM dependence when
++ * AT+CIMI was removed (see that comment below), and none of
++ * AT/ATE0/AT+CFUN?/AT+CEREG?/AT+CGSN/AT+CGMM/AT+CGMI/AT+CGMR/AT+CMUX
++ * require it. Exact text verified against AT Commands User Manual V1.6
++ * sec 4.14 (+MSTART, p.51-52): the module documents its own boot URCs as
++ * literally "AT command ready" and "+SIM READY" (both enabled by default,
++ * atready=1/simready=1), matching this project's own hardware logs
++ * exactly. */
++MODEM_CHAT_MATCHES_DEFINE(fibocom_le270_unsol, MODEM_CELLULAR_COMMON_UNSOL_MATCHES,
++			  MODEM_CHAT_MATCH("AT command ready", "", modem_cellular_chat_on_modem_ready));
 +
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(
 +	fibocom_le270_init_chat_script_cmds, MODEM_CHAT_SCRIPT_CMD_RESP("AT", ok_match),
@@ -373,23 +398,24 @@ index 00000000000..27a22ab2e03
 +	/* RESET_N held low for >=100ms per section 4.3; doubled for margin. */
 +	.reset_pulse_duration_ms = 200,
 +	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing
-+	 * diagrams are). Was 15000ms as an untested placeholder ("a starting
-+	 * point to tune against real hardware", following the EG800Z entry's
-+	 * own undocumented-startup margin) - this IS that tuning, now backed
-+	 * by data: the real hardware log shows the very first "AT" sent once
-+	 * RUN_INIT_SCRIPT begins already gets a clean OK back in ~4.5ms, so
-+	 * the modem's AT interface is up well before a 15s wait completes.
-+	 * Dropped to 2000ms, then tuned again 2026-10-05 with three more
-+	 * hardware samples (Modem_comparison_nRF93M1_vs_LE270.docx): all three
-+	 * independently show "AT command ready" at 1.06s and "+SIM READY" at
-+	 * 1.43s (power_pulse_duration_ms=700ms already included in both), with
-+	 * the init script itself only ever starting at the fixed 2.70s mark
-+	 * (700 + 2000) - over a second later than it needs to. Dropped to
-+	 * 1200ms (700 + 1200 = 1.9s total), leaving ~470ms margin over the
-+	 * worst "+SIM READY" sample across all three boots rather than the
-+	 * single sample the 2000ms figure above was based on. Flagged for
-+	 * hardware verification like the figure it replaces. */
-+	.startup_time_ms = 1200,
++	 * diagrams are). History: 15000ms untested placeholder -> 2000ms after
++	 * the first hardware sample showed "AT" getting a clean OK in ~4.5ms
++	 * -> 1200ms after three more samples showed "AT command ready"/"+SIM
++	 * READY" consistently at 1.06s/1.43s, but the init script itself only
++	 * ever starting at the fixed 2.70s mark regardless.
++	 *
++	 * Change 4, LE270_driver_optimisation_instructions.md (2026-10-05):
++	 * that whole fixed-timer approach is now the FALLBACK, not the primary
++	 * mechanism - see fibocom_le270_unsol above, which wakes AWAIT_POWER_ON
++	 * on "AT command ready" directly instead of waiting out this timer.
++	 * Per the instructions document's own guidance ("keep the timer as a
++	 * timeout fallback, at 3s or the HDG's maximum boot time" - no HDG
++	 * boot-time figure exists, same gap as this field's own history),
++	 * raised back up to 3000ms: now that the URC is the fast path for the
++	 * normal case, this value only matters if "AT command ready" is ever
++	 * missed or garbled, so it can afford real margin instead of being
++	 * tuned tight against the fastest observed sample. */
++	.startup_time_ms = 3000,
 +	/* Fallback-path-only since .shutdown above was added 2026-10-05: only
 +	 * reached if AT+CPWROFF errors and modem_cellular falls back to the
 +	 * power_off_pulse_duration_ms pulse. Was 10000ms, sized before any

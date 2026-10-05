@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: a744d86a1b3726f285be2c8736832d6cf31a05f1ceb140061a299b49c8ed74a9
+    sha256sum: 1a264acd830123a85ec7b7f5d7553e91820cdca416e9f83052e9c88eab058eca
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -472,3 +472,44 @@ patches:
       hardware - the instructions document's acceptance criteria are no
       timing regression in good coverage, and a clean timeout+shutdown
       with the antenna removed or RF shielded.
+
+      CONFIRMED 2026-10-05 (7 rounds): Change 3 passed. All 7/7 succeeded
+      (result=0), AT+CGACT=1,1 worked exactly as designed in the one round
+      where it mattered - AT+CEREG? read "0,2" (searching) before dialing,
+      so AT+CGACT=1,1 took the wait on itself (~4.8s to complete the
+      attach internally) and only returned once truly registered, with the
+      subsequent ATD*99***1# staying fast (0.21s) regardless. The 5
+      already-registered rounds showed zero timing regression (identical
+      ~4.6s totals to before this change). Two further unrelated findings,
+      tracked separately and not actioned (same treatment as the
+      net_if_down() stall entry above): one round's init script got zero
+      response to AT+CEREG? for a full 30s (its own existing timeout then
+      automatically retried the whole init script, which completed
+      normally in milliseconds on the second attempt - not caused by, or
+      related to, anything in this driver file; no code change needed
+      since the framework's own existing retry logic already handled it
+      gracefully).
+
+      2026-10-05 (Change 4): wakes AWAIT_POWER_ON on the "AT command
+      ready" URC instead of waiting out the full startup_time_ms fixed
+      timer. Uses modem_cellular's own existing mechanism for this
+      (modem_cellular_chat_on_modem_ready / MODEM_CELLULAR_EVENT_MODEM_
+      READY, already wired to MODEM_CELLULAR_COMMON_UNSOL_MATCHES for
+      other modems' "APP RDY"/"Ready" URCs) - no framework changes,
+      just adding this module's own URC text to fibocom_le270_unsol's
+      match table, exactly the extension pattern that macro is designed
+      for. Chose "AT command ready" over the instructions document's
+      primary suggestion of "+SIM READY", per the document's own "earlier
+      alternative, if the init script doesn't depend on the SIM" -
+      already true here (every init-script command was audited for SIM
+      dependence when AT+CIMI was removed earlier). Exact URC text
+      verified against AT Commands User Manual V1.6 sec 4.14 (+MSTART,
+      p.51-52), which documents the module's own boot URCs as literally
+      "AT command ready" and "+SIM READY" (both enabled by default).
+      startup_time_ms raised 1200ms->3000ms per the instructions
+      document's own guidance to keep it as a real fallback margin now
+      that it's no longer the primary mechanism - the URC path handles
+      the normal case; this only matters if "AT command ready" is ever
+      missed or garbled. Not yet verified on hardware - acceptance
+      criteria are the init script starting within 20ms of the URC, and
+      an error-free boot sequence across 10 rounds.
