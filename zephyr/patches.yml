@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 73e73efc7a9a96f71e1452933b8a6f90ba4e0b3d02c06c294bf79004cf5e4812
+    sha256sum: a9c3f9dc808f2a1586fa50aec2d0881b1703583c913e078dc0ce78e0458780c9
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -295,3 +295,68 @@ patches:
       attach just falls through to the exact same behavior as before
       (periodic-script wait), and an AT+CPWROFF error falls back to the
       original power-pulse shutdown path automatically.
+
+      CONFIRMED 2026-10-02 (same change, next hardware test): first fully
+      successful end-to-end round (CMUX/APN/dial/PPP/IPCP/UDP send all
+      succeeded, NETTRACE SUMMARY result=0). LE270 integration functionally
+      complete.
+
+      2026-10-05 (first optimization pass, commit 3c61afa): the user ran a
+      3-test Joulescope/log comparison against the nRF93M1
+      (Modem_comparison_nRF93M1_vs_LE270.docx) and found most of the LE270's
+      charge/time penalty was driver flow, not the modem. Fixed: removed
+      AT+CFUN=4 (init) and AT+CFUN=1 (dial) - the module attaches on its own
+      in its default CFUN=1, and forcing flight mode mid-boot was cancelling
+      that attach and paying for a second one; replaced the dial script's
+      AT+CFUN=1 + fixed 500ms settle with a real AT+CEREG? query right
+      before ATD (refreshes modem_cellular_is_registered()'s cache right
+      when AWAIT_REGISTERED's entry check needs it, instead of leaving it
+      stale until the first 2000ms periodic tick); added a .shutdown script
+      (AT+CPWROFF + a settle delay) so a successful shutdown skips the
+      3100ms power pulse + old 10000ms shutdown_time_ms wait entirely;
+      dropped startup_time_ms 2000ms->1200ms per 3 consistent "AT command
+      ready"/"+SIM READY" hardware samples. Confirmed on hardware the same
+      day: first full round completed in ~20.7s/~50µAh (down from the
+      un-optimized baseline), full details in the memory notes for this
+      session.
+
+      Same-day attempt to move this file out of the Zephyr tree entirely
+      (into firefly-app's own drivers/modem/, commit bc6d3b9) was reverted
+      (commit 9d07482 in firefly-app) after real hardware testing showed it
+      hung on boot with zero serial output, despite the move passing every
+      static check available (clean build/link, correct Kconfig resolution,
+      and an nm --print-size symbol-table diff against the last known-good
+      build showing zero differences across 3518 symbols). A hardware A/B
+      test - flashing the pre-move commit's separately-built hex - proved
+      the move itself was the cause. Root cause not pinned down (most likely
+      a link-layout-order sensitivity, e.g. Zephyr's same-priority
+      device-init ordering being link-order-dependent, or this board's
+      MPU stack-guard alignment being layout-sensitive) since restoring
+      working hardware took priority over further bisection. This file
+      stays as a Zephyr-tree patch for that reason - see the firefly-app
+      project memory (project_modem_consolidation.md) for the full
+      diagnosis writeup before attempting this move again.
+
+      2026-10-05 (second optimization pass, diagnosis step only):
+      LE270_driver_optimisation_instructions.md (written by the user's
+      hardware colleague after a second, more detailed Joulescope
+      comparison against the first optimization pass above) identified
+      ATD->CONNECT taking 1.41s instead of 0.21s as the largest remaining
+      cost, theorizing the boot-time attach isn't bringing up a default
+      bearer for the configured APN on CID 1. Per that document's own
+      process (diagnose before changing behavior; one change at a time,
+      hardware-verified before the next), added TEMPORARY, non-fatal
+      (allow_match) diagnostic reads - AT+CGDCONT?, AT+CGACT?,
+      AT+CGPADDR=1, all confirmed documented against AT Commands User
+      Manual V1.6 for this firmware (AT+CGCONTRDP, also suggested, is NOT
+      documented in this manual and was skipped per the document's own
+      "if the manual supports it" condition) - at two points: end of the
+      init script (still plain/non-CMUX AT, after the boot-time attach but
+      before the framework's own generic APN script ever runs
+      AT+CGDCONT=1,"IP","gsfleet.cxn") and the start of the dial script
+      (right after that APN script has run). Comparing the two should show
+      whether CID 1 was already active/addressed before this round touched
+      it, and whether writing CGDCONT disturbed it - the three outcomes
+      (A/B/C) in the instructions document each point to a different real
+      fix. Not yet run on hardware - next step once the user reports the
+      AT+CGDCONT?/AT+CGACT?/AT+CGPADDR responses from both points.

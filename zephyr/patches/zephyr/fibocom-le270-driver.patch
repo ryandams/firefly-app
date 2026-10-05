@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..1f34a320226
+index 00000000000..74bdf427080
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,341 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -147,7 +147,23 @@ index 00000000000..1f34a320226
 +	 * command for that firmware - if a module ever reports the older
 +	 * firmware version again (see the AT+CGMR comment above), expect
 +	 * this exact step to abort the script again. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match),
++	/* TEMPORARY diagnostic block, LE270_driver_optimisation_instructions.md
++	 * section 2 Change 1, step 1a - remove once that diagnosis is done.
++	 * Placed here (still plain/non-CMUX AT, after the boot-time attach but
++	 * before the framework's own auto-generated APN script ever writes
++	 * AT+CGDCONT) specifically to capture PDP context 1's state as left by
++	 * the module's own boot-time attach, before anything in this round
++	 * touches it. All three documented against AT Commands User Manual
++	 * V1.6 (AT+CGDCONT? sec 11.1 p.177, AT+CGACT? sec 11.4 p.184,
++	 * AT+CGPADDR sec 11.5 p.186) for firmware 12007.6000.00.05.37.02 -
++	 * none of them appear in the firmware-mismatch history above, and none
++	 * require CMUX to already be connected. allow_match (not ok_match):
++	 * these must never threaten the round this driver already gets right -
++	 * worst case one errors and we just don't get that data point. */
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGDCONT?", allow_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT?", allow_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
 +			 abort_matches, modem_cellular_chat_callback_handler, 30);
@@ -163,6 +179,15 @@ index 00000000000..1f34a320226
 +			       * this only misbehaves if CMEE is ever turned on
 +			       * elsewhere (see the AT+CMEE note in the init
 +			       * script above for why). */
++			      /* TEMPORARY diagnostic block, same instructions doc,
++			       * step 1a's second measurement point ("right before
++			       * ATD") - compare against the init script's block
++			       * above to see whether AT+CGDCONT (sent by the
++			       * framework's own generic APN script, between the
++			       * init and dial scripts) changed CID 1's state. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGDCONT?", allow_match),
++			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT?", allow_match),
++			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match),
 +			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT=0,1", allow_match),
 +			      /* AT+CFUN=1 and the fixed 500ms "AT" settle that used
 +			       * to sit here are both gone (removed 2026-10-05,
