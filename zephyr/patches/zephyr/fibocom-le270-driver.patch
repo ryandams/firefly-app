@@ -1,22 +1,22 @@
 diff --git a/drivers/modem/Kconfig.cellular b/drivers/modem/Kconfig.cellular
-index 8f65a7fb593..ac8d3cc2f08 100644
+index 1e140b86273..ac8d3cc2f08 100644
 --- a/drivers/modem/Kconfig.cellular
 +++ b/drivers/modem/Kconfig.cellular
-@@ -22,7 +22,7 @@ config MODEM_CELLULAR
+@@ -21,7 +21,8 @@ config MODEM_CELLULAR
+ 		 DT_HAS_U_BLOX_SARA_R4_ENABLED || DT_HAS_U_BLOX_SARA_R5_ENABLED || \
  		 DT_HAS_SWIR_HL7800_ENABLED || DT_HAS_TELIT_ME910G1_ENABLED || \
  		 DT_HAS_TELIT_ME310G1_ENABLED || DT_HAS_SQN_GM02S_ENABLED || \
- 		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_QUECTEL_EG800Z_ENABLED || \
--		 DT_HAS_SIMCOM_A76XX_ENABLED)
+-		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_SIMCOM_A76XX_ENABLED)
++		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_QUECTEL_EG800Z_ENABLED || \
 +		 DT_HAS_FIBOCOM_LE270_ENABLED || DT_HAS_SIMCOM_A76XX_ENABLED)
  	help
  	  This driver uses the generic 3gpp AT commands, along
  	  with the standard protocols CMUX and PPP, to configure
-
 diff --git a/drivers/modem/vendor_modem_cellular/CMakeLists.txt b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
-index a8b0958af92..bbbd7dd08f1 100644
+index 3ee0554d965..bbbd7dd08f1 100644
 --- a/drivers/modem/vendor_modem_cellular/CMakeLists.txt
 +++ b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
-@@ -8,6 +8,7 @@ if((CONFIG_DT_HAS_TELIT_ME910G1_ENABLED) OR (CONFIG_DT_HAS_TELIT_ME310G1_ENABLED
+@@ -8,10 +8,12 @@ if((CONFIG_DT_HAS_TELIT_ME910G1_ENABLED) OR (CONFIG_DT_HAS_TELIT_ME310G1_ENABLED
  endif()
  
  # zephyr-keep-sorted-start
@@ -24,13 +24,17 @@ index a8b0958af92..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_NORDIC_NRF91_SLM_ENABLED cellular_nordic_nrf91_slm.c)
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_NORDIC_NRF93M1_ENABLED cellular_nordic_nrf93m1.c)
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG25_G_ENABLED cellular_quectel_eg25_g.c)
-
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG800Q_ENABLED cellular_quectel_eg800q.c)
++zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG800Z_ENABLED cellular_quectel_eg800z.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_SIMCOM_A76XX_ENABLED cellular_simcom_a76xx.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_SIMCOM_SIM7080_ENABLED cellular_simcom_sim7080.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..6755e333e55
+index 00000000000..1f34a320226
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,316 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -48,13 +52,19 @@ index 00000000000..6755e333e55
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(
 +	fibocom_le270_init_chat_script_cmds, MODEM_CHAT_SCRIPT_CMD_RESP("AT", ok_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
++	/* AT+CFUN=4 deliberately NOT sent (removed 2026-10-05, was here since the
++	 * first working revision of this script). Joulescope + log correlation
++	 * (Modem_comparison_nRF93M1_vs_LE270.docx, section 6) showed this module
++	 * powers up in CFUN=1 and starts attaching to the network on its own
++	 * about 1.6s after PWRKEY drops - well before this init script even
++	 * starts (it runs on a fixed post-boot timer, see startup_time_ms
++	 * below). Forcing CFUN=4 here cancelled that in-progress attach
++	 * (~40mC wasted, measured), and the dial script then had to attach a
++	 * SECOND time after forcing CFUN=1 back. Simply never leaving CFUN=1
++	 * lets the one-and-only attach finish in the background while CMUX/APN
++	 * are being set up, instead of paying for two. AT+CFUN? below is kept
++	 * as a read-only diagnostic (confirms we're in CFUN=1 as expected). */
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
-+	/* Real hardware: AT+CFUN=4 ("flight mode" per AT Commands User Manual
-+	 * V1.6 sec 4.13 - CFUN=0, not CFUN=4, is "minimum functionality")
-+	 * returned OK in 203ms vs ~6ms for the AT+CFUN? read just before it.
-+	 * Settle here instead of racing straight into AT+CEREG? below. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 300),
 +	/* AT+CMEE deliberately NOT set anywhere in this driver (stays at the
 +	 * module's own default, CMEE=0 - plain "ERROR" on failure, no
 +	 * "+CME ERROR: <reason>" wrapper). This isn't an oversight: every
@@ -149,15 +159,48 @@ index 00000000000..6755e333e55
 +			       * stale state") reliably answers ERROR - observed
 +			       * both "ue busy" and "Last PDN disconnection not
 +			       * allowed" on real hardware - never OK. allow_match
-+			       * treats that as expected and moves straight on to
-+			       * AT+CFUN=1 below; this only misbehaves if CMEE is
-+			       * ever turned on elsewhere (see the AT+CMEE note in
-+			       * the init script above for why). */
++			       * treats that as expected and moves straight on;
++			       * this only misbehaves if CMEE is ever turned on
++			       * elsewhere (see the AT+CMEE note in the init
++			       * script above for why). */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT=0,1", allow_match),
-+			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
-+			      /* Small delay before dialing, otherwise some
-+			       * modules answer 'NO CARRIER' and abort. */
-+			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("AT", 500),
++			      /* AT+CFUN=1 and the fixed 500ms "AT" settle that used
++			       * to sit here are both gone (removed 2026-10-05,
++			       * together with the init script's AT+CFUN=4 above):
++			       * since we never leave CFUN=1, there's no mode
++			       * switch left to settle after. Replaced with a real
++			       * AT+CEREG? read instead of a dead timer - this
++			       * does double duty: (1) it's the modem_comparison
++			       * report's suggested "CEREG check" in place of the
++			       * blind wait before ATD, and (2) critically, it
++			       * refreshes modem_cellular_is_registered()'s cached
++			       * registration_status right before CONNECT, instead
++			       * of leaving it stale from the init script's own
++			       * early AT+CEREG? (sent before CMUX/APN, likely
++			       * before the attach above has finished). That cache
++			       * is exactly what modem_cellular_on_await_registered
++			       * _state_enter() checks immediately on entry after a
++			       * successful dial - if it's already true, REGISTERED
++			       * is entered synchronously and net_if_dormant_off()
++			       * runs right away; if this query is the only thing
++			       * that ever updated it (the old CFUN=4 flow left it
++			       * NOT_REGISTERED at this exact point every time),
++			       * the driver otherwise has to sit idle for one full
++			       * CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS (2000ms)
++			       * before the periodic script's own CEREG? read
++			       * updates it - confirmed as the exact source of the
++			       * report's "PPP starts exactly 2.000s after CONNECT"
++			       * finding by reading modem_cellular.c's state
++			       * machine (on_run_dial_script_state_enter attaches
++			       * PPP and fires net_if_carrier_on() immediately on
++			       * CONNECT regardless of registration, but the net_if
++			       * stays dormant - no LCP/IPCP traffic - until
++			       * REGISTERED's net_if_dormant_off() runs). If this
++			       * query still reads "not yet registered" (e.g. a
++			       * slow cell search, as in test 1 of that report),
++			       * this changes nothing: falls through to the same
++			       * periodic-script wait as before. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +			      /* AT Commands User Manual V1.6 section 11.3
 +			       * (D*99) documents ATD*99# as the plain form;
 +			       * *99***1# additionally selects PDP context 1
@@ -168,11 +211,11 @@ index 00000000000..6755e333e55
 +/* Timeout raised from the eg800q template's 10s: modem_chat_script_start()
 + * schedules this as a single whole-script watchdog (never reset per step),
 + * and the manual's own documented MaxResponseDuration for this script's
-+ * steps already sums past 10s on paper (AT+CGACT 50000ms + AT+CFUN=1
-+ * 25000ms + the 500ms settle + ATD*99***1# 3000ms = ~78.5s worst case) -
-+ * the same "whole script dies, CMUX/PPP never starts" failure as the
-+ * AT+CMEE=1 abort, just via TIMEOUT instead of ABORT. 90s covers the
-+ * documented worst case with margin; real steps run in milliseconds. */
++ * steps already sums past 10s on paper (AT+CGACT 50000ms + AT+CEREG?
++ * 5000ms + ATD*99***1# 3000ms = 58s worst case) - the same "whole script
++ * dies, CMUX/PPP never starts" failure as the AT+CMEE=1 abort, just via
++ * TIMEOUT instead of ABORT. 90s covers the documented worst case with
++ * margin; real steps run in milliseconds. */
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_dial_chat_script, fibocom_le270_dial_chat_script_cmds,
 +			 dial_abort_matches, modem_cellular_chat_callback_handler, 90);
 +
@@ -188,22 +231,51 @@ index 00000000000..6755e333e55
 +			 fibocom_le270_periodic_chat_script_cmds, abort_matches,
 +			 modem_cellular_chat_callback_handler, 15);
 +
++/* Added 2026-10-05, replacing "no .shutdown script" (see the removed comment
++ * this replaced, preserved in git history). Modem_comparison_nRF93M1_vs_
++ * LE270.docx section 6 measured the modem staying active for ~2.6-2.7s after
++ * CMUX/PPP teardown with NO shutdown script configured - an uncommanded,
++ * autonomous detach the modem only starts once it notices its AT/PPP
++ * channels have vanished - followed by a completely separate, much larger
++ * cost: modem_cellular.c's INIT_POWER_OFF, with no .shutdown script, falls
++ * straight to modem_cellular_begin_power_off_pulse() (power_off_pulse_
++ * duration_ms, 3100ms of PWRKEY held low) then AWAIT_POWER_OFF
++ * (shutdown_time_ms, 10000ms) before declaring the modem off - 13.1s fixed,
++ * even though the Joulescope trace shows modem current already at 0 well
++ * before either of those timers even finishes. Defining .scripts.shutdown
++ * changes this: per modem_cellular_run_shutdown_script_event_handler(),
++ * SCRIPT_SUCCESS here goes directly to IDLE, skipping the power pulse AND
++ * shutdown_time_ms entirely (same codepath cellular_quectel_eg800q.c already
++ * relies on for its AT+QPOWD). AT+CPWROFF is the Hardware Guide V2.2 sec 4.2
++ * documented power-off command - a real, commanded detach+power-off instead
++ * of letting the modem notice on its own, which is exactly what the report
++ * suggested ("send the power-off command on the AT DLCI"). It returns a bare
++ * OK with no completion URC (same doc, same section), so unlike EG800Z's
++ * "POWERED DOWN" match this can't confirm the modem has actually finished
++ * powering down - the trailing delay below exists for that reason, sized off
++ * the one real data point available (the ~2.6-2.7s uncommanded-detach
++ * window), not a documented completion time. If AT+CPWROFF ever errors
++ * (abort_matches), modem_cellular_run_shutdown_script_event_handler's
++ * SCRIPT_FAILED path already falls back to modem_cellular_begin_power_off_
++ * pulse() automatically - no worse off than before this script existed.
++ * Flagged for hardware verification: confirm on the Joulescope trace that
++ * modem current is actually 0 by the time this script's delay elapses, and
++ * tune the 3000ms figure from there. */
++MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_shutdown_chat_script_cmds,
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CPWROFF", ok_match),
++			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 3000));
++
++MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_shutdown_chat_script,
++			 fibocom_le270_shutdown_chat_script_cmds, abort_matches,
++			 modem_cellular_chat_callback_handler, 15);
++
 +static const struct modem_cellular_vendor_config fibocom_le270_vendor = {
 +	/* clang-format off */
 +	.scripts = {
 +		.init = &fibocom_le270_init_chat_script,
 +		.dial = &fibocom_le270_dial_chat_script,
 +		.periodic = &fibocom_le270_periodic_chat_script,
-+		/* No .shutdown script: unlike the EG800Z (AT+QPOWD followed by
-+		 * a documented "POWERED DOWN" URC), the LE270 Hardware Guide
-+		 * V2.2 documents AT+CPWROFF returning a plain OK with no
-+		 * completion URC, and separately documents hardware power-off
-+		 * via a >=3.1s PWRKEY pulse as an equally valid method (section
-+		 * 4.2). power_off_pulse_duration_ms below is sized to satisfy
-+		 * that pulse directly, so RUN_SHUTDOWN_SCRIPT's power_pulse
-+		 * fallback alone is sufficient - same pattern as
-+		 * cellular_quectel_eg800q.c.
-+		 */
++		.shutdown = &fibocom_le270_shutdown_chat_script,
 +	},
 +	.unsol_matches = {
 +		.matches = fibocom_le270_unsol,
@@ -213,9 +285,10 @@ index 00000000000..6755e333e55
 +	/* Hardware Guide V2.2 section 4.2: power on needs PWRKEY pulled low
 +	 * for >=650ms; hardware power off needs >=3.1s (3100ms) - too far
 +	 * apart to share one duration without either a wastefully long
-+	 * power-on pulse or a too-short power-off one (the latter risking an
-+	 * incomplete shutdown every round, since this modem has no .shutdown
-+	 * script to confirm power-off any other way). modem_cellular.h grew
++	 * power-on pulse or a too-short power-off one. This pulse path is now
++	 * the fallback only (see .shutdown above) - still kept at the full
++	 * documented 3100ms, since it's the hard guarantee that cuts power
++	 * even if AT+CPWROFF ever stops responding. modem_cellular.h grew
 +	 * a separate power_off_pulse_duration_ms field for exactly this split
 +	 * (falls back to power_pulse_duration_ms when left at 0, so every
 +	 * other vendor driver is unaffected) - see
@@ -236,15 +309,28 @@ index 00000000000..6755e333e55
 +	 * by data: the real hardware log shows the very first "AT" sent once
 +	 * RUN_INIT_SCRIPT begins already gets a clean OK back in ~4.5ms, so
 +	 * the modem's AT interface is up well before a 15s wait completes.
-+	 * Dropped to 2000ms - several orders of magnitude of margin above the
-+	 * one observed sample (this is a single boot, not a characterized
-+	 * worst case), and in line with cellular_sqn_gm02s.c's 2000ms for a
-+	 * modem with similarly undocumented startup timing, rather than the
-+	 * 10000-30000ms entries elsewhere in this file's siblings that are
-+	 * sized for modems with documented multi-second boot times this
-+	 * driver hasn't shown it needs. */
-+	.startup_time_ms = 2000,
-+	.shutdown_time_ms = 10000,
++	 * Dropped to 2000ms, then tuned again 2026-10-05 with three more
++	 * hardware samples (Modem_comparison_nRF93M1_vs_LE270.docx): all three
++	 * independently show "AT command ready" at 1.06s and "+SIM READY" at
++	 * 1.43s (power_pulse_duration_ms=700ms already included in both), with
++	 * the init script itself only ever starting at the fixed 2.70s mark
++	 * (700 + 2000) - over a second later than it needs to. Dropped to
++	 * 1200ms (700 + 1200 = 1.9s total), leaving ~470ms margin over the
++	 * worst "+SIM READY" sample across all three boots rather than the
++	 * single sample the 2000ms figure above was based on. Flagged for
++	 * hardware verification like the figure it replaces. */
++	.startup_time_ms = 1200,
++	/* Fallback-path-only since .shutdown above was added 2026-10-05: only
++	 * reached if AT+CPWROFF errors and modem_cellular falls back to the
++	 * power_off_pulse_duration_ms pulse. Was 10000ms, sized before any
++	 * hardware data existed; the same Joulescope traces that justified
++	 * .shutdown above show modem current reaching 0 well within the
++	 * power_off_pulse_duration_ms pulse itself, so this fallback-only
++	 * value no longer needs to carry the whole safety margin alone.
++	 * Dropped to 2000ms - still generous for a path that should now be
++	 * rare, without reintroducing a double-digit-second wait if it is
++	 * ever hit. */
++	.shutdown_time_ms = 2000,
 +};
 +
 +/* One user pipe only, on DLCI 3: the AT Commands User Manual documents "up
@@ -265,7 +351,6 @@ index 00000000000..6755e333e55
 +	MODEM_CELLULAR_DEFINE_INSTANCE(inst, &fibocom_le270_vendor)
 +
 +DT_INST_FOREACH_STATUS_OKAY(MODEM_CELLULAR_DEVICE_FIBOCOM_LE270)
-
 diff --git a/dts/bindings/modem/fibocom,le270.yaml b/dts/bindings/modem/fibocom,le270.yaml
 new file mode 100644
 index 00000000000..c4c6a41bc49

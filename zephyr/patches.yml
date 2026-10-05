@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 86659b89b6fb574f52669f7feaab45b64a4e36f373c406733a40b6049b9212b5
+    sha256sum: 73e73efc7a9a96f71e1452933b8a6f90ba4e0b3d02c06c294bf79004cf5e4812
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -217,3 +217,81 @@ patches:
       on the one channel that asked - it doesn't suffer the duplication.
       The only cost is detecting a registration change within ~2s instead
       of instantly.
+
+      CONFIRMED 2026-10-02 (next hardware test, same fix): first fully
+      successful end-to-end round. CMUX/DLCI/APN/dial/PPP/IPCP all
+      succeeded, NET_EVENT_L4_CONNECTED, sendto() returned success,
+      NETTRACE SUMMARY result=0. LE270 integration functionally complete.
+
+      2026-10-05 update (charge/timing optimization pass): the user ran 3
+      back-to-back hardware tests on this working firmware with a
+      Joulescope JS110 correlated against the firmware log (written up in
+      Modem_comparison_nRF93M1_vs_LE270.docx, compared against 3 nRF93M1
+      tests) specifically to find where time/charge were being wasted.
+      Findings and fixes, all confirmed by reading modem_cellular.c's
+      actual state-machine logic (not just inferred from the report):
+
+      1) AT+CFUN=4 in the init script was cancelling a network attach the
+      module starts by itself ~1.6s after power-on (it boots in CFUN=1),
+      wasting ~40mC on the aborted attempt, then paying for a second full
+      attach once AT+CFUN=1 was sent again in the dial script. Removed
+      AT+CFUN=4 (init) and AT+CFUN=1 (dial) entirely - the module simply
+      stays in CFUN=1 throughout, and its one-and-only attach runs in the
+      background while CMUX/APN are being configured. AT+CFUN? is kept in
+      the init script as a read-only diagnostic.
+
+      2) The driver wasted a fixed, unconditional 2.000s between CONNECT
+      and the start of PPP traffic, confirmed by reading
+      modem_cellular_on_run_dial_script_state_enter/_event_handler and
+      modem_cellular_on_await_registered_state_enter: PPP is attached and
+      net_if_carrier_on() fires immediately on CONNECT regardless of
+      registration state, but the net_if stays dormant (no LCP/IPCP) until
+      MODEM_CELLULAR_EVENT_REGISTERED fires and REGISTERED's
+      net_if_dormant_off() runs - gated entirely by
+      modem_cellular_is_registered()'s cached registration_status, which
+      with AT+CFUN=4 removed above was last set by the init script's own
+      AT+CEREG? sent early, before CMUX/APN, likely before the attach had
+      finished - so it read NOT_REGISTERED at dial time regardless, forcing
+      a wait for the first periodic-script tick
+      (CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS, 2000ms) to refresh it.
+      Fixed by replacing the dial script's old AT+CFUN=1 + fixed 500ms "AT"
+      settle (now unnecessary per point 1) with a real AT+CEREG? query
+      immediately before ATD*99***1# - this refreshes the registration
+      cache right before it matters, so a successful dial after an
+      already-complete attach now transitions straight to REGISTERED
+      instead of idling for a full periodic interval. Also addresses the
+      report's separately-flagged "fixed 0.5s wait before ATD" finding with
+      the same single change.
+
+      3) The driver waited a fixed ~13.1s after CMUX teardown before
+      declaring the modem off (power_off_pulse_duration_ms 3100ms + the old
+      shutdown_time_ms 10000ms), even though the Joulescope trace showed
+      modem current already at 0 roughly 2.6-2.7s after PPP went down -
+      confirmed by reading modem_cellular_run_shutdown_script_event_handler
+      and modem_cellular_on_init_power_off_state_enter: with no .shutdown
+      script configured, INIT_POWER_OFF falls straight to the blind
+      power-off pulse + shutdown_time_ms wait, with no way to end early.
+      Added a .shutdown script (AT+CPWROFF per Hardware Guide V2.2 sec 4.2,
+      the module's documented software power-off command, plus a 3000ms
+      settle since CPWROFF has no completion URC to wait on instead) -
+      defining .shutdown makes a successful shutdown script go straight to
+      IDLE, skipping the pulse and shutdown_time_ms entirely (same codepath
+      the EG800Z's AT+QPOWD already relies on). If AT+CPWROFF ever errors,
+      the framework automatically falls back to the original power-pulse
+      path, so this has no downside beyond the AT+CPWROFF round-trip
+      itself. shutdown_time_ms was also dropped 10000ms->2000ms as a
+      smaller safety margin for that now-rare fallback path only.
+
+      4) startup_time_ms (the fixed wait after the PWRKEY power-on pulse
+      before the init script starts) was dropped 2000ms->1200ms: all 3
+      hardware tests independently showed "AT command ready" at 1.06s and
+      "+SIM READY" at 1.43s (measured from power-on), well inside even the
+      reduced 1.9s total boot window (700ms pulse + 1200ms startup_time_ms).
+
+      All four changes are software-only (no devicetree/wiring changes),
+      verified by a clean ./33_build.sh -p rebuild. Not yet verified on
+      real hardware - that's the next test the user will run. Each change
+      above was deliberately designed to fail safe: an unexpectedly slow
+      attach just falls through to the exact same behavior as before
+      (periodic-script wait), and an AT+CPWROFF error falls back to the
+      original power-pulse shutdown path automatically.
