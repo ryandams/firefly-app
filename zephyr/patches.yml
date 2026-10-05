@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: a9c3f9dc808f2a1586fa50aec2d0881b1703583c913e078dc0ce78e0458780c9
+    sha256sum: 7257bdc77a0cb87cfb4894983f9e698ee3e5e0de2fa1a20a2ae1ec09f9f92e03
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -358,5 +358,20 @@ patches:
       whether CID 1 was already active/addressed before this round touched
       it, and whether writing CGDCONT disturbed it - the three outcomes
       (A/B/C) in the instructions document each point to a different real
-      fix. Not yet run on hardware - next step once the user reports the
+      fix.
+
+      Bug found on the first hardware attempt (fixed same day, before any
+      AT+CGDCONT?/AT+CGACT?/AT+CGPADDR data was collected): the init
+      script's diagnostic block was placed AFTER AT+CMUX=0,0,5,127 instead
+      of before it. The instant that command gets OK the modem switches
+      into CMUX framing, so the plain-text AT+CGDCONT? sent right after
+      went completely unrecognized - the init script hung for its full 30s
+      timeout, retried 3 times (each also timing out on the bare "AT"
+      probe, since the modem was left in a confused state after the first
+      malformed exchange), and srvNetwork's own 120s connect timeout ended
+      the round with result=-116. Fixed by moving all three diagnostic
+      reads to before AT+CMUX=0,0,5,127 (still correct for what they need
+      to measure - this is still before the framework's own APN script
+      ever runs, just also before the CMUX switch). Not yet re-tested on
+      hardware - next step once the user reports the
       AT+CGDCONT?/AT+CGACT?/AT+CGPADDR responses from both points.

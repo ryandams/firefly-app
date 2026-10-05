@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..74bdf427080
+index 00000000000..c7c2b35486a
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,347 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -147,23 +147,29 @@ index 00000000000..74bdf427080
 +	 * command for that firmware - if a module ever reports the older
 +	 * firmware version again (see the AT+CGMR comment above), expect
 +	 * this exact step to abort the script again. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match),
 +	/* TEMPORARY diagnostic block, LE270_driver_optimisation_instructions.md
 +	 * section 2 Change 1, step 1a - remove once that diagnosis is done.
-+	 * Placed here (still plain/non-CMUX AT, after the boot-time attach but
-+	 * before the framework's own auto-generated APN script ever writes
-+	 * AT+CGDCONT) specifically to capture PDP context 1's state as left by
-+	 * the module's own boot-time attach, before anything in this round
-+	 * touches it. All three documented against AT Commands User Manual
-+	 * V1.6 (AT+CGDCONT? sec 11.1 p.177, AT+CGACT? sec 11.4 p.184,
-+	 * AT+CGPADDR sec 11.5 p.186) for firmware 12007.6000.00.05.37.02 -
-+	 * none of them appear in the firmware-mismatch history above, and none
-+	 * require CMUX to already be connected. allow_match (not ok_match):
-+	 * these must never threaten the round this driver already gets right -
-+	 * worst case one errors and we just don't get that data point. */
++	 * Placed here, BEFORE AT+CMUX below (not after it - the modem switches
++	 * into CMUX framing the instant that command gets OK, so anything
++	 * sent as plain AT text afterwards goes completely unrecognized; a
++	 * first attempt at this diagnostic placed it after AT+CMUX and hung
++	 * the whole script for its full 30s timeout on real hardware,
++	 * confirming this the hard way). Still plain/non-CMUX AT here, after
++	 * the boot-time attach but before the framework's own auto-generated
++	 * APN script ever writes AT+CGDCONT - specifically to capture PDP
++	 * context 1's state as left by the module's own boot-time attach,
++	 * before anything in this round touches it. All three documented
++	 * against AT Commands User Manual V1.6 (AT+CGDCONT? sec 11.1 p.177,
++	 * AT+CGACT? sec 11.4 p.184, AT+CGPADDR sec 11.5 p.186) for firmware
++	 * 12007.6000.00.05.37.02 - none of them appear in the
++	 * firmware-mismatch history above, and none require CMUX to already
++	 * be connected. allow_match (not ok_match): these must never threaten
++	 * the round this driver already gets right - worst case one errors
++	 * and we just don't get that data point. */
 +	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGDCONT?", allow_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT?", allow_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match));
++	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
 +			 abort_matches, modem_cellular_chat_callback_handler, 30);
