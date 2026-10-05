@@ -16,4 +16,17 @@ target_include_directories(app PRIVATE
     code/helpers
 )
 
+# Fibocom LE270 modem_cellular vendor driver, kept in-repo instead of as a
+# Zephyr-tree patch (unlike the EG800Z/nRF93M1 drivers, which predate this
+# and still live under ncsworkspace/zephyr/drivers/modem/vendor_modem_cellular/
+# - see zephyr/patches.yml). dts/bindings/modem/fibocom,le270.yaml needs no
+# wiring at all: Zephyr's DTS_ROOT always includes APPLICATION_SOURCE_DIR
+# (cmake/modules/pre_dt.cmake), so <app>/dts/bindings is picked up
+# automatically. CONFIG_DT_HAS_FIBOCOM_LE270_ENABLED is available here
+# because find_package(Zephyr ...) above already ran devicetree + Kconfig
+# generation before this point in the file.
+if(CONFIG_DT_HAS_FIBOCOM_LE270_ENABLED)
+    target_sources(app PRIVATE drivers/modem/cellular_fibocom_le270.c)
+endif()
+
 target_link_libraries(app PRIVATE firefly_service)
