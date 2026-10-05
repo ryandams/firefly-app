@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..61109842487
+index 00000000000..27a22ab2e03
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,386 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -201,6 +201,54 @@ index 00000000000..61109842487
 +			       * this changes nothing: falls through to the same
 +			       * periodic-script wait as before. */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
++			      /* Change 3, LE270_driver_optimisation_instructions.md:
++			       * wait for real registration before dialing instead of
++			       * trusting a single AT+CEREG? snapshot, so a slow cell
++			       * search (observed on real hardware - see the sibling
++			       * Joulescope report's "test 1" outlier, and this
++			       * project's own round where AT+CEREG? above read "0,2"
++			       * right before a 4.2s dial instead of the usual 0.2s)
++			       * fails cleanly on a timeout instead of just dialing
++			       * into an unregistered modem and hoping.
++			       *
++			       * Deliberately NOT implemented as the instructions
++			       * document's own suggested AT+CEREG=1 (enabling
++			       * unsolicited registration URCs): this project already
++			       * has a confirmed, hardware-verified bug report for
++			       * exactly that command on this module (see the
++			       * AT+CEREG=1 comment in the init script above) - it
++			       * broadcasts every +CEREG: URC identically on all three
++			       * open CMUX DLCIs, which previously raced the PPP
++			       * handover badly enough to break every connection.
++			       * Re-enabling it here to satisfy this change would
++			       * reintroduce that exact bug.
++			       *
++			       * AT+CGACT=1,1 (activate context 1) is the real gate
++			       * instead, sent with a hard ok_match (not allow_match
++			       * like the best-effort AT+CGACT=0,1 above): AT Commands
++			       * User Manual V1.6 sec 11.4 (p.184) documents that the
++			       * activation form, unlike the deactivation form above,
++			       * "If the MT is not PS attached when the activation
++			       * form of the command is executed, the MT first
++			       * performs a PS attach and then attempts to activate
++			       * the specified contexts. If the attach fails then the
++			       * MT responds with ERROR" - so this one command already
++			       * gives exactly what the instructions document asked
++			       * for: wait (up to its own documented 50s
++			       * MaxResponseDuration) for a real attach if one is
++			       * still needed, succeed immediately as a no-op if
++			       * context 1 is already active (same manual: "If any
++			       * PDP context is already in the requested state, the
++			       * state of that context remains unchanged" - matching
++			       * this project's normal case), or fail with ERROR if
++			       * attach genuinely fails. A failure here hits
++			       * dial_abort_matches like any other, so
++			       * modem_cellular's own existing retry logic
++			       * (MODEM_CELLULAR_MAX_SCRIPT_FAILURES=3, ~2s apart via
++			       * the periodic-script timer) already does the "retry,
++			       * then fail the round cleanly and shut down normally"
++			       * part - no new state-machine code needed. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGACT=1,1", ok_match),
 +			      /* AT Commands User Manual V1.6 section 11.3
 +			       * (D*99) documents ATD*99# as the plain form;
 +			       * *99***1# additionally selects PDP context 1
@@ -208,16 +256,24 @@ index 00000000000..61109842487
 +			       * that MODEM_CELLULAR configures. */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("ATD*99***1#", connect_match));
 +
-+/* Timeout raised from the eg800q template's 10s: modem_chat_script_start()
-+ * schedules this as a single whole-script watchdog (never reset per step),
-+ * and the manual's own documented MaxResponseDuration for this script's
-+ * steps already sums past 10s on paper (AT+CGACT 50000ms + AT+CEREG?
-+ * 5000ms + ATD*99***1# 3000ms = 58s worst case) - the same "whole script
-+ * dies, CMUX/PPP never starts" failure as the AT+CMEE=1 abort, just via
-+ * TIMEOUT instead of ABORT. 90s covers the documented worst case with
-+ * margin; real steps run in milliseconds. */
++/* Timeout raised from the eg800q template's 10s, then again for Change 3
++ * above: modem_chat_script_start() schedules this as a single whole-script
++ * watchdog (never reset per step), and the manual's own documented
++ * MaxResponseDuration for this script's steps now sums to 108s worst case on
++ * paper (AT+CGACT=0,1 50000ms + AT+CEREG? 5000ms + AT+CGACT=1,1 50000ms +
++ * ATD*99***1# 3000ms) - past the old 90s budget, the same "whole script dies,
++ * CMUX/PPP never starts" failure as the AT+CMEE=1 abort, just via TIMEOUT
++ * instead of ABORT. Raised to 120s: covers the new documented worst case with
++ * margin, and matches CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S (srvNetwork's
++ * own outer connect timeout) exactly, per the instructions document's own
++ * suggested range (60-120s) for this change. Real steps run in milliseconds
++ * in the normal case; MODEM_CELLULAR_MAX_SCRIPT_FAILURES (3 retries, ~2s
++ * apart) bounds how many times this 120s watchdog could theoretically be hit
++ * in a row before the framework gives up and runs the normal shutdown path -
++ * srvNetwork's own 120s connect_timeout is the ultimate backstop regardless
++ * of how modem_cellular's internal retry state behaves. */
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_dial_chat_script, fibocom_le270_dial_chat_script_cmds,
-+			 dial_abort_matches, modem_cellular_chat_callback_handler, 90);
++			 dial_abort_matches, modem_cellular_chat_callback_handler, 120);
 +
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_periodic_chat_script_cmds,
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),

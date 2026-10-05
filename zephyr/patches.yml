@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 9709793f677c54643c2b08e5c7c65402483fd9c816ac60f179433326e6a13103
+    sha256sum: a744d86a1b3726f285be2c8736832d6cf31a05f1ceb140061a299b49c8ed74a9
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -429,3 +429,46 @@ patches:
       on hardware - the instructions document's own acceptance criterion
       for this change is 10 consecutive clean boots with no SIM/flash
       errors, which needs real testing.
+
+      CONFIRMED 2026-10-05 (9 consecutive rounds, reset between each):
+      Change 2 passed cleanly in all 9/9 - AT command ready and +SIM READY
+      appeared every boot, no SIM/flash errors, and the post-AT+CPWROFF
+      settle phase measured ~1.2s consistently in every round including
+      the two slow ones below. 2 of the 9 rounds (not caused by Change 2)
+      ran long for two different, unrelated reasons:
+      - One round: AT+CEREG? read "0,2" (searching) at the exact moment
+        the dial script checked it, so ATD took 4.21s instead of 0.21s -
+        pure network-timing variance, exactly the scenario Change 3 below
+        is meant to fix.
+      - One round: net_if_down(PPP) itself stalled ~6s before returning
+        (unrelated to this driver file - NO CARRIER arrived from the
+        network right as the app's own disconnect began, and Zephyr's
+        generic PPP L2 stack appears to time out trying to negotiate an
+        LCP termination handshake with an already-dead peer). Not covered
+        by any change in the instructions document; tracked separately,
+        not actioned as part of this optimization pass.
+
+      2026-10-05 (Change 3): added AT+CGACT=1,1 (hard ok_match) to the dial
+      script, right after the existing AT+CEREG? read, as the real
+      registration gate before ATD. Deliberately did NOT implement the
+      instructions document's own suggested approach (enabling AT+CEREG=1
+      unsolicited URCs) - this project already has a confirmed
+      hardware-verified bug for that exact command on this module (see the
+      2026-10-02 entry above: it broadcasts +CEREG: URCs identically on
+      all three open CMUX DLCIs, which previously broke every connection
+      by racing the PPP handover). Re-enabling it to satisfy this change
+      would reintroduce that bug. AT+CGACT=1,1's own documented behavior
+      (AT Commands User Manual V1.6 sec 11.4: performs a PS attach first
+      if not already attached, succeeds as a no-op if context 1 is already
+      active, fails with ERROR if attach genuinely fails) already gives
+      the wait-with-timeout-then-fail-cleanly behavior the instructions
+      document asked for, using modem_cellular's own existing dial-script
+      retry logic (MODEM_CELLULAR_MAX_SCRIPT_FAILURES=3) - no new
+      state-machine code needed. Raised the dial script's whole-script
+      timeout 90s->120s to match the new documented worst-case sum
+      (108s) with margin, and to align with srvNetwork's own
+      CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S, per the instructions
+      document's own suggested 60-120s range. Not yet verified on
+      hardware - the instructions document's acceptance criteria are no
+      timing regression in good coverage, and a clean timeout+shutdown
+      with the antenna removed or RF shielded.
