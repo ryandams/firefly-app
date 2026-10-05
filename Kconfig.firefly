@@ -241,22 +241,4 @@ config FIREFLY_NETWORK_SEND_SETTLE_MS
 	  modem suspend, which sends CMUX CLD) can race ahead and tear the link
 	  down before the datagram is physically transmitted.
 
-config FIREFLY_LE270_CMUX_MTU_WORKAROUND
-	bool
-	depends on DT_HAS_FIBOCOM_LE270_ENABLED
-	default y
-	select MODEM_CMUX_DEFAULT_MTU_127
-	help
-	  drivers/modem/Kconfig.cellular (upstream Zephyr) hardcodes
-	  MODEM_CELLULAR's "select MODEM_CMUX_DEFAULT_MTU_127 if (long DT_HAS_*
-	  OR list)" with one entry per vendor driver living in-tree. The LE270
-	  driver (drivers/modem/cellular_fibocom_le270.c) deliberately does NOT
-	  live in-tree - see its header comment and zephyr/patches.yml - so it
-	  can't add itself to that list without going back to patching
-	  Kconfig.cellular, which would defeat the point. This hidden symbol
-	  reproduces the same effect from firefly-app's own Kconfig instead:
-	  cellular_fibocom_le270.c's AT+CMUX command sets N1=127, and this
-	  selects the matching 127-byte MODEM_CMUX_MTU so Zephyr's local CMUX
-	  buffers agree with what's on the wire.
-
 endmenu
