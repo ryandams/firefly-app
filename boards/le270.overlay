@@ -85,6 +85,31 @@
 		compatible = "fibocom,le270";
 		mdm-power-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
 		zephyr,pm-device-runtime-auto;
+		/* LE270_driver_optimisation_instructions.md Change 1: real-hardware
+		 * diagnostics (AT+CGDCONT?/AT+CGACT?/AT+CGPADDR=1, read both before
+		 * and after modem_cellular's generic APN script runs) showed PDP
+		 * context 1 already has the gsfleet.cxn APN and a real IP address
+		 * from the module's own boot-time attach, completely unchanged by
+		 * the framework's AT+CGDCONT=1,"IP","gsfleet.cxn" rewrite (same
+		 * value, written every round regardless). A Joulescope current
+		 * trace correlated against the log showed that rewrite is what
+		 * triggers a ~2s burst of heavy RF re-signaling (RRC reconnect),
+		 * coincident with it to within 50ms - almost certainly the real
+		 * source of the slow ATD->CONNECT this document flagged. Since the
+		 * AT Commands Manual documents AT+CGDCONT's "RequireDataStoreAt
+		 * PowerDown: Yes" (confirmed empirically: it's already correct
+		 * before this driver ever touches it), there's nothing for the
+		 * framework to configure here - setting this skips
+		 * MODEM_CELLULAR_STATE_RUN_APN_SCRIPT entirely
+		 * (modem_cellular_open_dlci2_event_handler in modem_cellular.c),
+		 * so AT+CGDCONT/AT+CGACT are never sent at all and the dial script
+		 * goes straight from CMUX/DLCI setup to ATD*99***1# (cid=1 still
+		 * explicit there, matching the cid this module's own default
+		 * attach already uses - not cid=0 as the binding's generic
+		 * description implies, confirmed by the same diagnostics).
+		 * Flagged for hardware verification like everything else in this
+		 * optimization pass. */
+		zephyr,use-default-pdp-ctx = <1>;
 	};
 };
 
