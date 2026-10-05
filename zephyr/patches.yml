@@ -35,7 +35,7 @@ patches:
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 7257bdc77a0cb87cfb4894983f9e698ee3e5e0de2fa1a20a2ae1ec09f9f92e03
+    sha256sum: 9709793f677c54643c2b08e5c7c65402483fd9c816ac60f179433326e6a13103
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -375,3 +375,57 @@ patches:
       ever runs, just also before the CMUX switch). Not yet re-tested on
       hardware - next step once the user reports the
       AT+CGDCONT?/AT+CGACT?/AT+CGPADDR responses from both points.
+
+      Diagnosis result (next hardware test, same commit as the placement
+      fix above): the three AT+CGDCONT?/AT+CGACT?/AT+CGPADDR=1 readings
+      were identical before and after the framework's generic APN script
+      ran - +CGDCONT: 1,"IP","gsfleet.cxn","<ip>",0,0, +CGACT: 1,1 (already
+      active), same IP both times. PDP context 1 was rock-stable the whole
+      round; none of the instructions document's three hypotheses (A/B/C)
+      literally applied. A Joulescope current trace correlated against the
+      log resolved it anyway: current sits at an idle ~3.3mA baseline right
+      after CMUX connects, then jumps into sustained 100-125mA RF
+      re-signaling bursts for >2s starting within 50ms of the framework
+      sending AT+CGDCONT=1,"IP","gsfleet.cxn" (the rewrite) - not a brief
+      RACH blip, continuing straight through AT+CGACT=0,1/AT+CEREG?/ATD/
+      CONNECT. The rewrite itself, even though it writes a value already
+      correctly stored (confirmed via the AT manual's own
+      RequireDataStoreAtPowerDown=Yes for AT+CGDCONT and the diagnostic
+      reads above), is what triggers an RRC idle->connected reconnect -
+      Finding A's spirit (the rewrite disturbs things), via re-signaling
+      rather than literal deactivation.
+
+      Real fix (same day): the actual "only write if different" fix would
+      need to live in Zephyr's generic modem_cellular_build_apn_script()/
+      RUN_APN_SCRIPT - shared framework code, not LE270-specific. Found a
+      better option already built into the framework instead:
+      zephyr,use-default-pdp-ctx (a devicetree property, documented in
+      zephyr,cellular-modem-device.yaml, consumed in
+      modem_cellular_open_dlci2_event_handler()) skips RUN_APN_SCRIPT
+      entirely, relying purely on whatever the modem already has
+      configured. Set to 1 in boards/le270.overlay (not in this driver
+      file) - zero framework or vendor-driver C changes. Confirmed on
+      hardware the same day: ATD->CONNECT dropped from 1.417s to 0.21s
+      (exactly matching the instructions document's "fast" baseline),
+      power-on->IP-up dropped from 3.867s to 2.461s, total round from
+      8.095s to 6.691s, all with result=0. Change 1 from the instructions
+      document is done.
+
+      2026-10-05 (Change 2): removed the now-complete temporary diagnostic
+      reads from both the init and dial scripts (their job was done once
+      Change 1's root cause was confirmed). Also trimmed the .shutdown
+      script's post-AT+CPWROFF settle 3000ms->1000ms per the instructions
+      document's Change 2: a Joulescope trace showed modem current
+      reaching 0 within 0.39-0.51s of AT+CPWROFF's OK on all 3 tests, but
+      neither manual documents a minimum wait specifically after that
+      command's OK before cutting power (the Hardware Guide's >=5s figure
+      is for the PWRKEY/hardware power-off method specifically; the AT
+      manual's own MaxResponseDuration=3000ms for +CPWROFF is how long the
+      OK itself may take, not a post-OK requirement) - confirmed with the
+      user there's no LE270 status/V_INT pin wired on this board to detect
+      power-off directly, so per the instructions document's own fallback
+      for that case, used ~2x the worst observed current-to-zero time
+      (1000ms) rather than reusing an unrelated figure. Not yet verified
+      on hardware - the instructions document's own acceptance criterion
+      for this change is 10 consecutive clean boots with no SIM/flash
+      errors, which needs real testing.

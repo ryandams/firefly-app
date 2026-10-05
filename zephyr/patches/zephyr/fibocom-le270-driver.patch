@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..c7c2b35486a
+index 00000000000..61109842487
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,347 @@
+@@ -0,0 +1,330 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -147,28 +147,6 @@ index 00000000000..c7c2b35486a
 +	 * command for that firmware - if a module ever reports the older
 +	 * firmware version again (see the AT+CGMR comment above), expect
 +	 * this exact step to abort the script again. */
-+	/* TEMPORARY diagnostic block, LE270_driver_optimisation_instructions.md
-+	 * section 2 Change 1, step 1a - remove once that diagnosis is done.
-+	 * Placed here, BEFORE AT+CMUX below (not after it - the modem switches
-+	 * into CMUX framing the instant that command gets OK, so anything
-+	 * sent as plain AT text afterwards goes completely unrecognized; a
-+	 * first attempt at this diagnostic placed it after AT+CMUX and hung
-+	 * the whole script for its full 30s timeout on real hardware,
-+	 * confirming this the hard way). Still plain/non-CMUX AT here, after
-+	 * the boot-time attach but before the framework's own auto-generated
-+	 * APN script ever writes AT+CGDCONT - specifically to capture PDP
-+	 * context 1's state as left by the module's own boot-time attach,
-+	 * before anything in this round touches it. All three documented
-+	 * against AT Commands User Manual V1.6 (AT+CGDCONT? sec 11.1 p.177,
-+	 * AT+CGACT? sec 11.4 p.184, AT+CGPADDR sec 11.5 p.186) for firmware
-+	 * 12007.6000.00.05.37.02 - none of them appear in the
-+	 * firmware-mismatch history above, and none require CMUX to already
-+	 * be connected. allow_match (not ok_match): these must never threaten
-+	 * the round this driver already gets right - worst case one errors
-+	 * and we just don't get that data point. */
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGDCONT?", allow_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT?", allow_match),
-+	MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match),
 +	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_init_chat_script, fibocom_le270_init_chat_script_cmds,
@@ -185,15 +163,6 @@ index 00000000000..c7c2b35486a
 +			       * this only misbehaves if CMEE is ever turned on
 +			       * elsewhere (see the AT+CMEE note in the init
 +			       * script above for why). */
-+			      /* TEMPORARY diagnostic block, same instructions doc,
-+			       * step 1a's second measurement point ("right before
-+			       * ATD") - compare against the init script's block
-+			       * above to see whether AT+CGDCONT (sent by the
-+			       * framework's own generic APN script, between the
-+			       * init and dial scripts) changed CID 1's state. */
-+			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGDCONT?", allow_match),
-+			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT?", allow_match),
-+			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGPADDR=1", allow_match),
 +			      MODEM_CHAT_SCRIPT_CMD_RESP_MULT("AT+CGACT=0,1", allow_match),
 +			      /* AT+CFUN=1 and the fixed 500ms "AT" settle that used
 +			       * to sit here are both gone (removed 2026-10-05,
@@ -283,18 +252,32 @@ index 00000000000..c7c2b35486a
 + * suggested ("send the power-off command on the AT DLCI"). It returns a bare
 + * OK with no completion URC (same doc, same section), so unlike EG800Z's
 + * "POWERED DOWN" match this can't confirm the modem has actually finished
-+ * powering down - the trailing delay below exists for that reason, sized off
-+ * the one real data point available (the ~2.6-2.7s uncommanded-detach
-+ * window), not a documented completion time. If AT+CPWROFF ever errors
-+ * (abort_matches), modem_cellular_run_shutdown_script_event_handler's
-+ * SCRIPT_FAILED path already falls back to modem_cellular_begin_power_off_
-+ * pulse() automatically - no worse off than before this script existed.
-+ * Flagged for hardware verification: confirm on the Joulescope trace that
-+ * modem current is actually 0 by the time this script's delay elapses, and
-+ * tune the 3000ms figure from there. */
++ * powering down - the trailing delay below exists for that reason.
++ *
++ * Delay tuned 2026-10-05 per LE270_driver_optimisation_instructions.md
++ * Change 2: a Joulescope trace showed modem current reaching 0 within
++ * 0.39-0.51s after AT+CPWROFF's OK on all 3 tests, but this delay was
++ * fixed at 3000ms (sized off an unrelated earlier data point - how long
++ * the modem stayed active with NO .shutdown script at all, not this
++ * command's own completion time). Checked both manuals for a documented
++ * minimum wait specifically after AT+CPWROFF's OK before cutting power -
++ * found none: the Hardware Guide V2.2 sec 4.2 only documents a timing
++ * requirement for the PWRKEY/hardware power-off method (>=5s after
++ * releasing PWRKEY before the next power-on), not AT+CPWROFF, and the AT
++ * Commands Manual's own +CPWROFF entry only documents MaxResponseDuration
++ * =3000ms (how long the OK itself may take to arrive, not a post-OK
++ * wait). Confirmed with the user: no LE270 status/V_INT pin is wired to
++ * an MCU GPIO on this board (can't detect power-off directly), so per
++ * the instructions document's own fallback for that case, dropped to
++ * 1000ms - roughly 2x the worst observed current-to-zero time, rather
++ * than inventing a number closer to the unrelated 3000ms/5000ms figures
++ * above. Flagged for hardware verification across multiple consecutive
++ * rounds (the instructions document's own acceptance criterion - 10
++ * consecutive clean boots, no SIM/flash errors) before trusting this
++ * long-term. */
 +MODEM_CHAT_SCRIPT_CMDS_DEFINE(fibocom_le270_shutdown_chat_script_cmds,
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CPWROFF", ok_match),
-+			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 3000));
++			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 1000));
 +
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_shutdown_chat_script,
 +			 fibocom_le270_shutdown_chat_script_cmds, abort_matches,
