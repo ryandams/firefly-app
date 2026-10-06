@@ -1,0 +1,35 @@
+diff --git a/drivers/modem/modem_cellular.c b/drivers/modem/modem_cellular.c
+index 49db4240526..a822975e745 100644
+--- a/drivers/modem/modem_cellular.c
++++ b/drivers/modem/modem_cellular.c
+@@ -1499,6 +1499,30 @@ static void modem_cellular_await_ppp_dead_event_handler(struct modem_cellular_da
+ 			modem_cellular_enter_state(data, MODEM_CELLULAR_STATE_RUN_DIAL_SCRIPT);
+ 		}
+ 		break;
++	case MODEM_CELLULAR_EVENT_SUSPEND:
++		/* Every other state in this file handles SUSPEND by transitioning
++		 * to INIT_POWER_OFF - this one didn't, so a pm_device_runtime_put()
++		 * suspend request arriving while here (e.g. racing a self-inflicted
++		 * NET_EVENT_PPP_PHASE_DEAD fired by the application's own
++		 * net_if_down() call, which legitimately transitions PPP through
++		 * its own "dead" phase as a normal part of terminating the link)
++		 * was silently dropped by the default case below, leaving the
++		 * driver to run its unsolicited-PPP-death recovery path
++		 * (TIMEOUT -> RUN_DIAL_SCRIPT, repeatedly, bounded only by
++		 * MODEM_CELLULAR_MAX_SCRIPT_FAILURES) instead of honoring the
++		 * application's actual shutdown request - observed on real
++		 * hardware as several minutes of automatic redial attempts after
++		 * a round had already reported success, ending in a shutdown
++		 * script timeout once failures were exhausted. No manual cleanup
++		 * needed here: modem_cellular_enter_state() always calls the
++		 * current state's own _leave() function first, and
++		 * on_await_ppp_dead_state_leave() below already does exactly the
++		 * net_if_carrier_off/modem_chat_release/modem_ppp_release cleanup
++		 * this needs, same as every other SUSPEND-handling state in this
++		 * file already relies on for whatever cleanup their own state
++		 * requires. */
++		modem_cellular_enter_state(data, MODEM_CELLULAR_STATE_INIT_POWER_OFF);
++		break;
+ 	default:
+ 		break;
+ 	}

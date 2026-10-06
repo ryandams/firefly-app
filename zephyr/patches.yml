@@ -34,6 +34,64 @@ patches:
       too-short, unreliable power-off one - see
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
+  - path: zephyr/modem-cellular-suspend-during-ppp-dead.patch
+    sha256sum: 92ae88ad3bd10ee5b1dc4489009b0d00c32dfd281718a04c4d12602f6524fdbb
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-10-06
+    upstreamable: true
+    comments: |
+      Adds a missing MODEM_CELLULAR_EVENT_SUSPEND case to
+      modem_cellular_await_ppp_dead_event_handler() (AWAIT_PPP_DEAD state),
+      transitioning to MODEM_CELLULAR_STATE_INIT_POWER_OFF like every other
+      state in this file already does on SUSPEND. No manual cleanup needed
+      in the new case: modem_cellular_enter_state() always calls the
+      current state's own _leave() function first, and
+      modem_cellular_on_await_ppp_dead_state_leave() already does exactly
+      the net_if_carrier_off/modem_chat_release/modem_ppp_release cleanup
+      this needs - verified by reading modem_cellular_enter_state()'s
+      implementation directly, not assumed.
+
+      Found 2026-10-06 while debugging a real-hardware finding on the
+      LE270 target (see fibocom-le270-driver.patch's own changelog):
+      several minutes of automatic redial attempts occurring AFTER
+      srvNetwork had already reported a round as successfully finished,
+      eventually exhausting MODEM_CELLULAR_MAX_SCRIPT_FAILURES and ending
+      in a shutdown-script timeout with the modem rebooting mid-sequence.
+      Root cause: an application's own net_if_down() call legitimately
+      drives Zephyr's PPP L2 through its own "dead" phase as a normal part
+      of terminating the link (LCP termination), firing
+      NET_EVENT_PPP_PHASE_DEAD - if this self-inflicted event is processed
+      while net_if_is_admin_up() still reads true (net_if_down() hasn't
+      finished clearing that flag yet), modem_cellular_registered_event
+      _handler() legitimately transitions to AWAIT_PPP_DEAD, exactly as it
+      would for a genuine unexpected network-side PPP drop. A
+      pm_device_runtime_put() suspend request arriving during the
+      resulting ~200ms (reset_pulse_duration_ms) settle window was
+      silently dropped by AWAIT_PPP_DEAD's default case - this driver had
+      no way to distinguish "the application wants to shut down" from "the
+      network dropped us, try to reconnect" once in this state. Once the
+      settle timer fired, the driver proceeded into its own unsolicited-
+      PPP-death recovery path (TIMEOUT -> RUN_DIAL_SCRIPT, retrying up to
+      MODEM_CELLULAR_MAX_SCRIPT_FAILURES=3 times, each attempt able to
+      consume the full per-script timeout if the modem doesn't respond),
+      completely unaware the application had already moved on.
+
+      This likely also explains an earlier LE270 finding tracked
+      separately and not actioned at the time: net_if_down(PPP) itself
+      stalling for several seconds before returning on some rounds -
+      probably the same race, resolving on its own that time instead of
+      escalating into a full redial-then-give-up cycle.
+
+      Not LE270-specific: this is a genuine gap in the shared
+      AWAIT_PPP_DEAD state handling, affecting any vendor driver using
+      this framework without a .network script (the only architecture
+      where AWAIT_PPP_DEAD's own TIMEOUT handler unconditionally redials).
+      Not yet verified on hardware - the fix is designed to be small and
+      self-contained (one missing switch case, relying on an already-
+      proven cleanup path) specifically so it can be verified in isolation
+      before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
     sha256sum: 1a264acd830123a85ec7b7f5d7553e91820cdca416e9f83052e9c88eab058eca
     module: zephyr
@@ -513,3 +571,19 @@ patches:
       missed or garbled. Not yet verified on hardware - acceptance
       criteria are the init script starting within 20ms of the URC, and
       an error-free boot sequence across 10 rounds.
+
+      CONFIRMED 2026-10-05/06: Change 4's own acceptance criterion passed
+      cleanly across all rounds tested - init script start measured ~0.22ms
+      after "AT command ready" (well under the 20ms target), and AT
+      command ready now shows as a matched command rather than "unknown".
+      But a serious, separate finding surfaced in the same test: one round
+      reported success (result=0) and then, with no button press,
+      automatically redialed on its own several minutes later, succeeded
+      once, then failed 3 times in a row (each burning a full 120s
+      timeout - the budget raised in the Change 3 entry above), and ended
+      with the modem rebooting mid-shutdown. Root-caused and fixed in
+      modem-cellular-suspend-during-ppp-dead.patch (see that entry for the
+      full mechanism) - a genuine framework gap, not something fixable
+      within this vendor driver file alone. This also likely explains the
+      net_if_down() multi-second stall finding noted earlier in this
+      changelog. Not yet re-verified on hardware after that fix.
