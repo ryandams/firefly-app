@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..2ba46d067da
+index 00000000000..2bb3d369b02
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,412 @@
+@@ -0,0 +1,436 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -395,8 +395,32 @@ index 00000000000..2ba46d067da
 +	 * pulse means less of its early output is missed). */
 +	.power_pulse_duration_ms = 700,
 +	.power_off_pulse_duration_ms = 3100,
-+	/* RESET_N held low for >=100ms per section 4.3; doubled for margin. */
++	/* RESET_N held low for >=100ms per section 4.3; doubled for margin.
++	 * RESET_N isn't wired on this board (see boards/le270.overlay), so
++	 * MODEM_CELLULAR_STATE_RESET_PULSE - the only place this value drives
++	 * a real GPIO - is never entered for this instance; it only matters
++	 * here as the AWAIT_PPP_DEAD settle fallback a few lines of
++	 * commentary above this struct already documents (the
++	 * CEREG-duplication-race recovery path), which this change doesn't
++	 * touch. */
 +	.reset_pulse_duration_ms = 200,
++	/* Change 5, LE270_driver_optimisation_instructions.md (2026-10-06):
++	 * real-hardware logs show a ~200ms fixed gap between "CMUX
++	 * disconnected" and AT+CPWROFF being sent - modem_cellular.c reused
++	 * reset_pulse_duration_ms (above) for this settle, but that value is
++	 * tied to the RESET_N pulse width spec, not to how long this UART
++	 * actually needs after CMUX teardown before un-multiplexed AT
++	 * commands are reliably accepted again. Split via the new
++	 * shutdown_cmux_settle_ms field (modem_cellular.h) instead of
++	 * shrinking reset_pulse_duration_ms itself, so the unrelated
++	 * AWAIT_PPP_DEAD recovery-path timing above is left exactly as
++	 * documented and verified. Document suggests 10-20ms; picked the top
++	 * of that range for margin on only the second LE270 ADP tested on.
++	 * Acceptance criterion: under 50ms between "CMUX disconnected" and
++	 * AT+CPWROFF OK - next hardware round confirms. Falls back to
++	 * reset_pulse_duration_ms (200ms, the pre-Change-5 behavior) if ever
++	 * set back to 0. */
++	.shutdown_cmux_settle_ms = 20,
 +	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing
 +	 * diagrams are). History: 15000ms untested placeholder -> 2000ms after
 +	 * the first hardware sample showed "AT" getting a clean OK in ~4.5ms

@@ -16,7 +16,7 @@ patches:
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
   - path: zephyr/modem-cellular-power-off-pulse.patch
-    sha256sum: 2093327c0eeaa5e4958e22328470d120e24c2457e817cc50a9ab48eaf16c3a37
+    sha256sum: 368beb59a4db6f12a09c014ad122321d6c5503176cb9a7c7a2a57aa193709002
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -34,6 +34,25 @@ patches:
       too-short, unreliable power-off one - see
       cellular_fibocom_le270.c's use of the new field in
       fibocom-le270-driver.patch.
+
+      2026-10-06 update (Change 5, LE270_driver_optimisation_instructions.md):
+      added a second field the same way, shutdown_cmux_settle_ms, used by
+      modem_cellular_init_power_off_event_handler()'s
+      MODEM_CELLULAR_EVENT_CMUX_DISCONNECTED case when non-zero instead of
+      the existing reset_pulse_duration_ms (fallback unchanged, so every
+      other vendor driver is still unaffected). Real LE270 hardware logs
+      showed a ~200ms fixed gap between "CMUX disconnected" and
+      AT+CPWROFF being sent, reusing reset_pulse_duration_ms for that
+      settle - but that field is tied to a vendor's documented RESET_N
+      pulse width (LE270: >=100ms per its Hardware Guide), which has no
+      real relation to how long the UART needs after CMUX teardown before
+      it reliably accepts un-multiplexed AT commands again. Split out
+      rather than just shrinking reset_pulse_duration_ms itself, so this
+      driver's unrelated AWAIT_PPP_DEAD recovery-path timing (see
+      modem-cellular-suspend-during-ppp-dead.patch) stays exactly as
+      documented and hardware-verified. See fibocom-le270-driver.patch's
+      own changelog for the LE270-side value chosen and verification
+      status.
   - path: zephyr/modem-cellular-suspend-during-ppp-dead.patch
     sha256sum: 92ae88ad3bd10ee5b1dc4489009b0d00c32dfd281718a04c4d12602f6524fdbb
     module: zephyr
@@ -93,7 +112,7 @@ patches:
       proven cleanup path) specifically so it can be verified in isolation
       before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 1a264acd830123a85ec7b7f5d7553e91820cdca416e9f83052e9c88eab058eca
+    sha256sum: 3eb1b6639d66a18f1e377e64c6bf0d40cd13752e2312f2bdfbc733a4bdf92b05
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -587,3 +606,44 @@ patches:
       within this vendor driver file alone. This also likely explains the
       net_if_down() multi-second stall finding noted earlier in this
       changelog. Not yet re-verified on hardware after that fix.
+
+      CONFIRMED 2026-10-06 (9 consecutive rounds): the suspend-during-
+      ppp-dead fix held, but a separate real-hardware zombie-redial
+      cascade (403s/4 timeouts) surfaced from a different mechanism -
+      net_if_down(PPP) deterministically stalling 9.003s because this
+      module never acks PPP's LCP Terminate-Request (sends NO CARRIER
+      instead), which Zephyr's generic PPP L2 doesn't treat as a carrier
+      drop. Fixed via Kconfig only (CONFIG_NET_L2_PPP_TIMEOUT/
+      MAX_TERMINATE_REQ_RETRANSMITS in conf/modem_le270.conf, not this
+      driver file) - see that conf file's own comment and the
+      project_modem_consolidation.md memory for the full diagnosis,
+      including a same-day regression (RETRANSMITS=0 looked faster but
+      triggered a real Zephyr fsm.c bug that permanently broke PPP after
+      round 1) and its fix (RETRANSMITS=1). Both confirmed on hardware:
+      9/9 consecutive rounds clean, net_if_down(PPP) consistently ~15ms-1s
+      instead of 9s.
+
+      2026-10-06 (Change 5, LE270_driver_optimisation_instructions.md):
+      real hardware logs showed a ~200ms fixed gap between CMUX fully
+      disconnecting and AT+CPWROFF being sent during shutdown, with the
+      modem still RRC-connected at ~30mA the whole time - traced to
+      modem_cellular_init_power_off_event_handler() reusing
+      reset_pulse_duration_ms (200ms, documented against this module's
+      RESET_N pulse width spec, a GPIO not even wired on this board) as a
+      generic "let the UART settle after CMUX teardown" delay. Took the
+      document's Option B (the simpler of the two offered - Option A,
+      sending AT+CPWROFF before closing CMUX at all, would need
+      restructuring shared modem_cellular.c state-machine ordering used
+      by every vendor driver, too large a change right after today's PPP
+      Kconfig regression already showed how a shared-timing edit can have
+      non-obvious side effects). Added a new, separate
+      shutdown_cmux_settle_ms vendor-config field (see
+      modem-cellular-power-off-pulse.patch's own changelog) instead of
+      just shrinking reset_pulse_duration_ms directly, specifically so
+      this driver's unrelated, already-hardware-verified AWAIT_PPP_DEAD
+      CEREG-duplication-race recovery timing (documented a few lines above
+      this struct) is left untouched. Set to 20ms, the top of the
+      document's suggested 10-20ms range, falling back to the old 200ms
+      behavior if ever set back to 0. Acceptance criterion: under 50ms
+      between "CMUX disconnected" and AT+CPWROFF OK. Not yet verified on
+      hardware - next test after this build.
