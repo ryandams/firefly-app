@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..2bb3d369b02
+index 00000000000..3085a48b1c8
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,436 @@
+@@ -0,0 +1,455 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -65,8 +65,8 @@ index 00000000000..2bb3d369b02
 + * init script doesn't depend on the SIM" - confirmed true here: every
 + * command in this init script was already audited for SIM dependence when
 + * AT+CIMI was removed (see that comment below), and none of
-+ * AT/ATE0/AT+CFUN?/AT+CEREG?/AT+CGSN/AT+CGMM/AT+CGMI/AT+CGMR/AT+CMUX
-+ * require it. Exact text verified against AT Commands User Manual V1.6
++ * AT/ATE0/AT+CEREG?/AT+CGSN/AT+CGMM/AT+CGMI/AT+CGMR/AT+CMUX require it.
++ * Exact text verified against AT Commands User Manual V1.6
 + * sec 4.14 (+MSTART, p.51-52): the module documents its own boot URCs as
 + * literally "AT command ready" and "+SIM READY" (both enabled by default,
 + * atready=1/simready=1), matching this project's own hardware logs
@@ -87,9 +87,16 @@ index 00000000000..2bb3d369b02
 +	 * (~40mC wasted, measured), and the dial script then had to attach a
 +	 * SECOND time after forcing CFUN=1 back. Simply never leaving CFUN=1
 +	 * lets the one-and-only attach finish in the background while CMUX/APN
-+	 * are being set up, instead of paying for two. AT+CFUN? below is kept
-+	 * as a read-only diagnostic (confirms we're in CFUN=1 as expected). */
-+	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN?", ok_match),
++	 * are being set up, instead of paying for two.
++	 *
++	 * AT+CFUN? itself removed here too (Change 6,
++	 * LE270_driver_optimisation_instructions.md, 2026-10-06): it was only
++	 * ever a read-only diagnostic confirming CFUN=1 as expected - nothing
++	 * in this codebase reads modem_cellular_chat_on_cfun's result (there
++	 * is no such callback; this step used the bare ok_match, so the
++	 * response text itself was discarded) or acts on it. Pure dead
++	 * weight once the diagnostic job it was added for (verifying the
++	 * CFUN=4 removal above) was done. */
 +	/* AT+CMEE deliberately NOT set anywhere in this driver (stays at the
 +	 * module's own default, CMEE=0 - plain "ERROR" on failure, no
 +	 * "+CME ERROR: <reason>" wrapper). This isn't an oversight: every
@@ -421,6 +428,18 @@ index 00000000000..2bb3d369b02
 +	 * reset_pulse_duration_ms (200ms, the pre-Change-5 behavior) if ever
 +	 * set back to 0. */
 +	.shutdown_cmux_settle_ms = 20,
++	/* Change 6, LE270_driver_optimisation_instructions.md (2026-10-06):
++	 * real hardware logs show a ~100ms fixed gap between AT+CMUX's OK and
++	 * the first CMUX SABM frame being sent - modem_cellular.c's generic
++	 * 100ms default exists for modems that disable UART RX while
++	 * switching into CMUX mode, but nothing in this driver's own history
++	 * has shown that symptom on this module. Document suggests trying
++	 * 20ms; picked the bottom of its suggested 10-20ms range since this
++	 * delay (unlike Change 5's shutdown settle) guards the one CMUX
++	 * handshake every round's dial path depends on - keep the original
++	 * 100ms (set this back to 0) if CMUX setup ever fails, even once, in
++	 * 20 rounds, per the document's own instruction. */
++	.cmux_connect_settle_ms = 20,
 +	/* Not documented in the Hardware Guide (only the PWRKEY-pulse timing
 +	 * diagrams are). History: 15000ms untested placeholder -> 2000ms after
 +	 * the first hardware sample showed "AT" getting a clean OK in ~4.5ms

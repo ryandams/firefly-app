@@ -1,8 +1,26 @@
 diff --git a/drivers/modem/modem_cellular.c b/drivers/modem/modem_cellular.c
-index 49db4240526..632c9ec0c55 100644
+index 49db4240526..7e2944ed8b6 100644
 --- a/drivers/modem/modem_cellular.c
 +++ b/drivers/modem/modem_cellular.c
-@@ -1526,12 +1526,17 @@ static void modem_cellular_init_power_off_event_handler(struct modem_cellular_da
+@@ -1050,11 +1050,16 @@ static void modem_cellular_run_init_script_event_handler(struct modem_cellular_d
+ 
+ static int modem_cellular_on_connect_cmux_state_enter(struct modem_cellular_data *data)
+ {
++	const struct modem_cellular_config *config = data->dev->config;
++	const uint16_t settle_ms = (config->vendor->cmux_connect_settle_ms != 0)
++					    ? config->vendor->cmux_connect_settle_ms
++					    : 100;
++
+ 	/*
+ 	 * Allow modem to switch bus into CMUX mode. Some modems disable UART RX while
+ 	 * switching, resulting in UART RX errors as bus is no longer pulled up by modem.
+ 	 */
+-	modem_cellular_start_timer(data, K_MSEC(100));
++	modem_cellular_start_timer(data, K_MSEC(settle_ms));
+ 	return 0;
+ }
+ 
+@@ -1526,12 +1531,17 @@ static void modem_cellular_init_power_off_event_handler(struct modem_cellular_da
  	const struct modem_cellular_config *config = data->dev->config;
  
  	switch (evt) {
@@ -23,7 +41,7 @@ index 49db4240526..632c9ec0c55 100644
  	case MODEM_CELLULAR_EVENT_TIMEOUT:
  		/* Shutdown script can only be used if cmd_pipe is available, i.e. we are not in
  		 * some intermediary state without a pipe for commands available
-@@ -1597,10 +1602,13 @@ static int modem_cellular_on_run_shutdown_script_state_leave(struct modem_cellul
+@@ -1597,10 +1607,13 @@ static int modem_cellular_on_run_shutdown_script_state_leave(struct modem_cellul
  static int modem_cellular_on_power_off_pulse_state_enter(struct modem_cellular_data *data)
  {
  	const struct modem_cellular_config *config = data->dev->config;
@@ -39,10 +57,10 @@ index 49db4240526..632c9ec0c55 100644
  }
  
 diff --git a/include/zephyr/drivers/modem/modem_cellular.h b/include/zephyr/drivers/modem/modem_cellular.h
-index f1444b390c5..107248a3433 100644
+index f1444b390c5..ed09428da70 100644
 --- a/include/zephyr/drivers/modem/modem_cellular.h
 +++ b/include/zephyr/drivers/modem/modem_cellular.h
-@@ -221,7 +221,25 @@ struct modem_cellular_vendor_config {
+@@ -221,7 +221,32 @@ struct modem_cellular_vendor_config {
  		uint16_t size;
  	} unsol_matches;
  	uint16_t power_pulse_duration_ms;
@@ -65,6 +83,13 @@ index f1444b390c5..107248a3433 100644
 +	 * un-multiplexed AT commands again - a single shared duration can't be
 +	 * tuned for one purpose without also changing the other. */
 +	uint16_t shutdown_cmux_settle_ms;
++	/* Settle time after AT+CMUX's OK before sending the first CMUX SABM
++	 * frame (0 means "use the hard-coded 100ms default" - every existing
++	 * vendor driver leaves this at 0 and is unaffected). The 100ms default
++	 * exists because some modems disable UART RX while switching into CMUX
++	 * mode; not every modem needs the full 100ms, so this is a per-vendor
++	 * tunable rather than a global reduction of that default. */
++	uint16_t cmux_connect_settle_ms;
  	uint16_t startup_time_ms;
  	uint16_t shutdown_time_ms;
  	/* Force the `autostart` property regardless of devicetree */

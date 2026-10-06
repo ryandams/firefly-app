@@ -16,7 +16,7 @@ patches:
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
   - path: zephyr/modem-cellular-power-off-pulse.patch
-    sha256sum: 368beb59a4db6f12a09c014ad122321d6c5503176cb9a7c7a2a57aa193709002
+    sha256sum: 2dfdb87c8bc6029e848cce71b4c394b8059dcf49445adf202c446bea23f5bb1f
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -53,6 +53,19 @@ patches:
       documented and hardware-verified. See fibocom-le270-driver.patch's
       own changelog for the LE270-side value chosen and verification
       status.
+
+      2026-10-06 update (Change 6, LE270_driver_optimisation_instructions.md):
+      added a third field the same way, cmux_connect_settle_ms, used by
+      modem_cellular_on_connect_cmux_state_enter() when non-zero instead of
+      the hard-coded 100ms wait after AT+CMUX's OK before the first CMUX
+      SABM frame (fallback unchanged at 100ms, so every other vendor
+      driver is still unaffected). That 100ms default exists for modems
+      that disable UART RX while switching into CMUX mode; nothing in this
+      LE270 driver's own history has shown that symptom, and real hardware
+      logs show the fixed ~100ms gap between AT+CMUX's OK and the first
+      SABM as a real, if small, charge/time cost every round. See
+      fibocom-le270-driver.patch's own changelog for the LE270-side value
+      chosen and verification status.
   - path: zephyr/modem-cellular-suspend-during-ppp-dead.patch
     sha256sum: 92ae88ad3bd10ee5b1dc4489009b0d00c32dfd281718a04c4d12602f6524fdbb
     module: zephyr
@@ -112,7 +125,7 @@ patches:
       proven cleanup path) specifically so it can be verified in isolation
       before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: 3eb1b6639d66a18f1e377e64c6bf0d40cd13752e2312f2bdfbc733a4bdf92b05
+    sha256sum: b85e0055bd5f4ffc9697cf38f9559ca7584ab7cb673d29e23916e66d11bba33a
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -645,5 +658,60 @@ patches:
       this struct) is left untouched. Set to 20ms, the top of the
       document's suggested 10-20ms range, falling back to the old 200ms
       behavior if ever set back to 0. Acceptance criterion: under 50ms
-      between "CMUX disconnected" and AT+CPWROFF OK. Not yet verified on
-      hardware - next test after this build.
+      between "CMUX disconnected" and AT+CPWROFF OK.
+
+      CONFIRMED 2026-10-06 (12 consecutive rounds, all result=0): "CMUX
+      disconnected" -> AT+CPWROFF sent measured ~20.4-20.5ms in every
+      single round (device-uptime timestamps), matching the configured
+      20ms almost exactly and comfortably under the 50ms acceptance
+      criterion. The same 12-round test also re-confirmed the same-day
+      PPP termination regression fix (all 12 rounds succeeded, no
+      stuck-PPP symptom) and a separate zbus net_buf pool exhaustion fix
+      (12 button presses, zero publish errors - see
+      project_modem_consolidation.md memory for that unrelated finding).
+      One round hit the already-known "button pressed again before the
+      modem finished powering down" edge case (recovered automatically
+      via the init script's existing retry-on-timeout, result=0) -
+      previously confirmed acceptable by the user, not a new issue.
+      Change 5 is done.
+
+      2026-10-06 (Change 6, LE270_driver_optimisation_instructions.md):
+      two changes, same hardware round. (1) Added a third vendor-config
+      field, cmux_connect_settle_ms (see
+      modem-cellular-power-off-pulse.patch's own changelog), used by
+      modem_cellular_on_connect_cmux_state_enter() instead of the generic
+      framework's hard-coded 100ms wait after AT+CMUX's OK before the
+      first CMUX SABM frame - that default exists for modems that disable
+      UART RX while switching into CMUX mode, a symptom this driver's
+      history has never shown. Set to 20ms, the bottom of the document's
+      suggested 10-20ms range (chosen lower than Change 5's 20ms since
+      this delay guards the one CMUX handshake every round's dial path
+      depends on, per the document's own "keep the original value if CMUX
+      setup fails even once in 20 rounds" instruction). (2) Removed
+      AT+CFUN? from the init script entirely (not just cached - deleted):
+      confirmed it was only ever a read-only diagnostic added to verify
+      the AT+CFUN=4 removal in the 2026-10-05 entry above, using the bare
+      ok_match with no callback, so its response text was never parsed or
+      acted on anywhere in this codebase.
+
+      Did NOT implement the rest of the document's Change 6 list this
+      round: re-reading AT+CGSN/AT+CGMM/AT+CGMI/AT+CGMR only once "after
+      boot" and skipping them on later rounds would need the init script
+      itself to vary at runtime (e.g. swapping which modem_chat_script the
+      framework runs, or a per-step conditional-skip mechanism) - modem_chat
+      scripts are static compile-time command lists with neither today, and
+      building either would be a materially bigger framework change than
+      fits one verifiable step, for a combined saving of roughly 25-30ms
+      (measured: each query's own round-trip in prior hardware logs). The
+      document's own ATE0/AT&W suggestion (item 3) was also left alone -
+      its own text explicitly says to "keep ATE0 if you're unsure" given
+      its ~4ms cost, and this firmware has a documented history of
+      diverging from its manual in surprising ways (CMUX/CMEE/CIMI, see
+      the 2026-10-02 entries above), so the AT&W verification burden isn't
+      worth it for a 4ms saving. Flagging both as deliberately deferred,
+      not silently dropped.
+
+      Not yet verified on hardware - next test after this build.
+      Acceptance criterion: "init script start" -> "dial script start"
+      about 0.15s or less (was ~0.40s), with 20 consecutive successful
+      rounds.
