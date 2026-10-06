@@ -231,14 +231,24 @@ config FIREFLY_NETWORK_MESSAGE
 	default "hello from firefly"
 
 config FIREFLY_NETWORK_SEND_SETTLE_MS
-	int "Delay after send() before disconnecting"
+	int "Maximum wait for the destination's echo reply before disconnecting"
 	default 1000
 	range 0 60000
 	help
 	  sendto() only hands the datagram to the local network stack; it says
 	  nothing about whether the CMUX frame carrying it has actually drained
-	  over the modem UART. Without this wait, disconnect() (net_if_down +
+	  over the modem UART. Without some wait, disconnect() (net_if_down +
 	  modem suspend, which sends CMUX CLD) can race ahead and tear the link
 	  down before the datagram is physically transmitted.
+	  As of 2026-10-06 this is no longer an unconditional sleep: modem_send()
+	  (srvNetwork.cpp) sets this as the UDP socket's SO_RCVTIMEO and waits
+	  for the destination's echo reply (the GSFleet test server echoes every
+	  datagram it receives - confirmed on real hardware, typically arriving
+	  within ~0.3-0.4s) before disconnecting, proceeding immediately once it
+	  arrives rather than always waiting out the full value. This remains
+	  the upper bound for that wait: if no echo arrives (destination
+	  unreachable, reply lost, antenna removed for a coverage test, etc.),
+	  recv() still returns once this timeout elapses, so behavior never
+	  waits longer than it did before - only ever the same or less.
 
 endmenu

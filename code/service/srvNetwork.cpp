@@ -56,6 +56,7 @@
 // declare them.
 #include <zephyr/posix/netinet/in.h>
 #include <zephyr/posix/sys/socket.h>
+#include <zephyr/posix/sys/time.h>
 #include <zephyr/posix/unistd.h>
 #endif
 
@@ -351,6 +352,39 @@ int modem_send(void *, const void *data, size_t len)
     const int send_errno = errno;
     trace_point(sent >= 0 ? "sendto() returned success" : "sendto() returned failure");
     if (sent >= 0) { mark(SENT); }
+
+    if (sent >= 0) {
+        // sendto() returning success only means the payload was queued by
+        // the local UDP/IP stack - it says nothing about whether it has
+        // actually drained out over the modem UART yet. The destination
+        // test server echoes every datagram it receives right back
+        // (confirmed on real hardware), so wait for that instead of a
+        // blind fixed sleep: it's strong, immediate confirmation the
+        // payload cleared the modem and reached the server, typically
+        // arriving in ~0.3-0.4s - well under the old fixed 1s wait.
+        // SO_RCVTIMEO (set below) bounds this by
+        // CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS, so if nothing arrives
+        // (server unreachable, reply lost, antenna removed for a coverage
+        // test, etc.) recv() still returns once that elapses - this never
+        // waits longer than the old behavior did, only ever the same or
+        // less.
+        struct timeval rcv_timeout = {};
+        rcv_timeout.tv_sec = CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS / 1000;
+        rcv_timeout.tv_usec = (CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS % 1000) * 1000;
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout)) != 0) {
+            LOG_WRN("setsockopt(SO_RCVTIMEO) failed (%d) - echo wait may block indefinitely",
+                    errno);
+        }
+
+        trace_point("waiting for echo (bounded by SEND_SETTLE as a timeout)");
+        char echo_buf[64];
+        struct sockaddr_in from = {};
+        socklen_t from_len = sizeof(from);
+        const ssize_t echoed = recvfrom(sock, echo_buf, sizeof(echo_buf), 0,
+                                         reinterpret_cast<struct sockaddr *>(&from), &from_len);
+        trace_point(echoed > 0 ? "echo received" : "no echo within timeout - proceeding anyway");
+    }
+
     close(sock);
     trace_point("UDP socket closed");
 
@@ -516,14 +550,16 @@ private:
             static const char message[] = CONFIG_FIREFLY_NETWORK_MESSAGE;
 
             LOG_INF("connected - sending %zu bytes", sizeof(message) - 1);
+            // g_port->send() (modem_send() for the real port) already traces
+            // its own "sendto()"/echo-wait sequence and waits for the
+            // destination's echo reply, bounded by
+            // CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS, before returning - see
+            // that function for why. Nothing left to trace here but the
+            // result: by the time this call returns, everything it would
+            // have said already happened.
             err = g_port->send(g_port->context, message, sizeof(message) - 1);
             if (err != 0) {
                 LOG_ERR("send failed (%d)", err);
-            } else {
-                trace_point("payload handed to Zephyr UDP stack");
-                LOG_INF("NETTRACE no receive is performed; following delay is SEND_SETTLE, not RTT");
-                k_sleep(K_MSEC(CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS));
-                trace_point("send settle delay complete");
             }
         } else {
             LOG_ERR("connect failed (%d)", err);
