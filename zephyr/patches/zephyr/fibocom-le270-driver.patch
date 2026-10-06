@@ -31,10 +31,10 @@ index 3ee0554d965..bbbd7dd08f1 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
 new file mode 100644
-index 00000000000..3085a48b1c8
+index 00000000000..361d51f7554
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_fibocom_le270.c
-@@ -0,0 +1,455 @@
+@@ -0,0 +1,502 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -204,34 +204,31 @@ index 00000000000..3085a48b1c8
 +			       * AT+CEREG? read instead of a dead timer - this
 +			       * does double duty: (1) it's the modem_comparison
 +			       * report's suggested "CEREG check" in place of the
-+			       * blind wait before ATD, and (2) critically, it
-+			       * refreshes modem_cellular_is_registered()'s cached
-+			       * registration_status right before CONNECT, instead
-+			       * of leaving it stale from the init script's own
-+			       * early AT+CEREG? (sent before CMUX/APN, likely
-+			       * before the attach above has finished). That cache
-+			       * is exactly what modem_cellular_on_await_registered
-+			       * _state_enter() checks immediately on entry after a
-+			       * successful dial - if it's already true, REGISTERED
-+			       * is entered synchronously and net_if_dormant_off()
-+			       * runs right away; if this query is the only thing
-+			       * that ever updated it (the old CFUN=4 flow left it
-+			       * NOT_REGISTERED at this exact point every time),
-+			       * the driver otherwise has to sit idle for one full
++			       * blind wait before ATD, and (2) it refreshes
++			       * modem_cellular_is_registered()'s cached
++			       * registration_status, instead of leaving it stale
++			       * from the init script's own early AT+CEREG? (sent
++			       * before CMUX/APN, likely before the attach above
++			       * has finished). That cache is exactly what
++			       * modem_cellular_on_await_registered_state_enter()
++			       * checks immediately on entry after a successful
++			       * dial - if it's already true, REGISTERED is
++			       * entered synchronously and net_if_dormant_off()
++			       * runs right away; otherwise the driver has to sit
++			       * idle for one full
 +			       * CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS (2000ms)
 +			       * before the periodic script's own CEREG? read
-+			       * updates it - confirmed as the exact source of the
-+			       * report's "PPP starts exactly 2.000s after CONNECT"
-+			       * finding by reading modem_cellular.c's state
-+			       * machine (on_run_dial_script_state_enter attaches
-+			       * PPP and fires net_if_carrier_on() immediately on
-+			       * CONNECT regardless of registration, but the net_if
-+			       * stays dormant - no LCP/IPCP traffic - until
-+			       * REGISTERED's net_if_dormant_off() runs). If this
-+			       * query still reads "not yet registered" (e.g. a
-+			       * slow cell search, as in test 1 of that report),
-+			       * this changes nothing: falls through to the same
-+			       * periodic-script wait as before. */
++			       * updates it.
++			       *
++			       * NOTE: AT+CGACT=1,1 below sits between this read
++			       * and ATD, and can itself take real time completing
++			       * an attach - so by the time CONNECT arrives, this
++			       * particular read is no longer a guaranteed-fresh
++			       * snapshot. See the second AT+CEREG? read after
++			       * AT+CGACT=1,1 below (added 2026-10-06) for the one
++			       * that actually re-establishes that guarantee right
++			       * before ATD; this one mainly feeds the
++			       * registration-wait logic AT+CGACT=1,1 needs. */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +			      /* Change 3, LE270_driver_optimisation_instructions.md:
 +			       * wait for real registration before dialing instead of
@@ -281,6 +278,53 @@ index 00000000000..3085a48b1c8
 +			       * then fail the round cleanly and shut down normally"
 +			       * part - no new state-machine code needed. */
 +			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGACT=1,1", ok_match),
++			      /* Added 2026-10-06: root-caused why the very first
++			       * connection after an MCU reset consistently took
++			       * ~2s longer than every round after it, by reading
++			       * modem_cellular.c's state machine directly rather
++			       * than guessing. AT+CGACT=1,1 above can itself
++			       * complete a real attach (its documented behavior,
++			       * see the comment above it), but a successful
++			       * AT+CGACT response alone never updates
++			       * modem_cellular_is_registered()'s cached
++			       * registration_status - only a parsed "+CEREG:"
++			       * line does, and the one above was read *before*
++			       * AT+CGACT=1,1, so it can still be stale by the time
++			       * CONNECT arrives. On the very first connection since
++			       * boot this always bites: net_if's dormant flag
++			       * starts "on" (modem_ppp_ppp_api_init(), called once
++			       * at boot) and is only ever cleared by
++			       * modem_cellular_on_registered_state_enter()'s
++			       * net_if_dormant_off() - reached only once the cache
++			       * says registered. With the cache stale, the driver
++			       * falls back to waiting a full
++			       * CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS (2000ms)
++			       * for its own periodic poll to refresh it, measured
++			       * on real hardware as an exact 2.000-2.01s gap
++			       * between CONNECT and the first PPP byte. Every round
++			       * after the first was never affected by this same
++			       * staleness, purely because the normal clean-suspend
++			       * path (REGISTERED's own SUSPEND handler) never turns
++			       * dormant back on - only the rare AWAIT_PPP_DEAD
++			       * recovery path does - so dormant simply stays off
++			       * for the rest of the session once any round clears
++			       * it, masking the bug rather than fixing it.
++			       *
++			       * This second AT+CEREG? read, immediately before
++			       * ATD, closes the gap directly: it refreshes the
++			       * cache right when modem_cellular_on_await_registered
++			       * _state_enter()'s immediate check needs it to be
++			       * fresh, regardless of whether dormant happens to
++			       * already be clear. Uses a hard ok_match like the
++			       * read above it - this is a plain query, not an
++			       * action command, so an ERROR here would be a real,
++			       * unexpected failure worth aborting on, not something
++			       * to tolerate. Adds one AT round-trip (~5-8ms,
++			       * consistent with every other plain AT+CEREG?/AT+CSQ
++			       * read in this driver's scripts) to every round;
++			       * removes the ~2s penalty specifically from whichever
++			       * round is first to actually need it. */
++			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG?", ok_match),
 +			      /* AT Commands User Manual V1.6 section 11.3
 +			       * (D*99) documents ATD*99# as the plain form;
 +			       * *99***1# additionally selects PDP context 1
@@ -291,19 +335,22 @@ index 00000000000..3085a48b1c8
 +/* Timeout raised from the eg800q template's 10s, then again for Change 3
 + * above: modem_chat_script_start() schedules this as a single whole-script
 + * watchdog (never reset per step), and the manual's own documented
-+ * MaxResponseDuration for this script's steps now sums to 108s worst case on
++ * MaxResponseDuration for this script's steps now sums to 113s worst case on
 + * paper (AT+CGACT=0,1 50000ms + AT+CEREG? 5000ms + AT+CGACT=1,1 50000ms +
-+ * ATD*99***1# 3000ms) - past the old 90s budget, the same "whole script dies,
-+ * CMUX/PPP never starts" failure as the AT+CMEE=1 abort, just via TIMEOUT
-+ * instead of ABORT. Raised to 120s: covers the new documented worst case with
-+ * margin, and matches CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S (srvNetwork's
-+ * own outer connect timeout) exactly, per the instructions document's own
-+ * suggested range (60-120s) for this change. Real steps run in milliseconds
-+ * in the normal case; MODEM_CELLULAR_MAX_SCRIPT_FAILURES (3 retries, ~2s
-+ * apart) bounds how many times this 120s watchdog could theoretically be hit
-+ * in a row before the framework gives up and runs the normal shutdown path -
-+ * srvNetwork's own 120s connect_timeout is the ultimate backstop regardless
-+ * of how modem_cellular's internal retry state behaves. */
++ * AT+CEREG? 5000ms + ATD*99***1# 3000ms - the second AT+CEREG? added
++ * 2026-10-06 above contributes another 5000ms) - still under the 120s
++ * budget below, with less margin than before. Past the old 90s budget this
++ * would be the same "whole script dies, CMUX/PPP never starts" failure as
++ * the AT+CMEE=1 abort, just via TIMEOUT instead of ABORT. 120s covers the
++ * documented worst case with margin, and matches
++ * CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S (srvNetwork's own outer connect
++ * timeout) exactly, per the instructions document's own suggested range
++ * (60-120s) for this change. Real steps run in milliseconds in the normal
++ * case; MODEM_CELLULAR_MAX_SCRIPT_FAILURES (3 retries, ~2s apart) bounds how
++ * many times this 120s watchdog could theoretically be hit in a row before
++ * the framework gives up and runs the normal shutdown path - srvNetwork's
++ * own 120s connect_timeout is the ultimate backstop regardless of how
++ * modem_cellular's internal retry state behaves. */
 +MODEM_CHAT_SCRIPT_DEFINE(fibocom_le270_dial_chat_script, fibocom_le270_dial_chat_script_cmds,
 +			 dial_abort_matches, modem_cellular_chat_callback_handler, 120);
 +

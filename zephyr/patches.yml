@@ -125,7 +125,7 @@ patches:
       proven cleanup path) specifically so it can be verified in isolation
       before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: b85e0055bd5f4ffc9697cf38f9559ca7584ab7cb673d29e23916e66d11bba33a
+    sha256sum: e56c3c5b2b65d5c8716cd28a23c260b792ebf7548260cc6f0cdbc769d776141b
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -711,7 +711,57 @@ patches:
       worth it for a 4ms saving. Flagging both as deliberately deferred,
       not silently dropped.
 
-      Not yet verified on hardware - next test after this build.
-      Acceptance criterion: "init script start" -> "dial script start"
-      about 0.15s or less (was ~0.40s), with 20 consecutive successful
-      rounds.
+      CONFIRMED 2026-10-06 (12 consecutive rounds, all result=0): both
+      implemented sub-items individually confirmed working -
+      AT+CMUX OK -> first SABM measured ~20-21ms in every round (matches
+      cmux_connect_settle_ms=20 exactly), and AT+CFUN? confirmed absent
+      from the init script transcript every round. No CMUX setup failure
+      in any round. The aggregate "init script start -> dial script start
+      about 0.15s or less" target was NOT met (measured ~311-318ms
+      consistently) - not because this change underperformed, but because
+      of a separate, newly-discovered cost outside this change's scope:
+      the very first AT command sent after "AT command ready" (Change 4's
+      wake mechanism) consistently takes ~233ms to get an OK, every
+      round, while every other init-script command answers in 5-8ms.
+      Joulescope correlation showed the modem's current genuinely drops
+      to a low/idle ~8-9mA level for ~165ms right after "AT command
+      ready" before rising again when the OK actually arrives - the
+      module appears to still be internally busy despite that URC's name.
+      Presented three options to the user (leave as-is / add a deliberate
+      settle delay / stop optimizing here); the user chose to leave it
+      as-is. No further change made for that finding - see
+      project_modem_consolidation.md memory for the full writeup if it
+      ever needs revisiting. Change 6 is otherwise done.
+
+      2026-10-06 (separate finding + fix, from investigating why round 1
+      after an MCU reset consistently took ~2s longer than every round
+      after it): traced to modem_cellular.c's own state machine, not
+      anything specific to Change 6. modem_cellular_on_await_registered
+      _state_enter() checks a cached registration flag immediately after
+      CONNECT; if stale, it falls back to waiting a full
+      CONFIG_MODEM_CELLULAR_PERIODIC_SCRIPT_MS (2000ms) for the periodic
+      script's own AT+CEREG? to refresh it - confirmed via log timestamps
+      as an exact 2.000-2.01s gap between CONNECT and the first PPP byte,
+      and via a periodic_chat_script run appearing between them only in
+      round 1 of every log checked. AT+CGACT=1,1 (Change 3) sits between
+      the dial script's existing AT+CEREG? read and ATD, and can itself
+      take real time completing an attach - so that read is no longer
+      guaranteed-fresh by the time CONNECT arrives, reopening a gap a
+      2026-10-05 fix had already closed once. Every round after the first
+      was masked from this by an unrelated quirk: net_if_dormant_on() is
+      only ever called once at boot (modem_ppp_ppp_api_init()) and by the
+      rare AWAIT_PPP_DEAD recovery path - never by the normal clean-
+      suspend path - so once any round clears it via net_if_dormant_off(),
+      it stays clear for the rest of the session, bypassing the
+      registration-staleness gate entirely regardless of what the cache
+      says. Fix: added a second AT+CEREG? read, immediately before ATD
+      (after AT+CGACT=1,1), to re-establish the "fresh right before
+      CONNECT" guarantee regardless of whether dormant happens to already
+      be clear. Adds one AT round-trip (~5-8ms) to every round; removes
+      the ~2s penalty from whichever round is first to actually need it
+      (normally just round 1, but potentially any round reached via the
+      AWAIT_PPP_DEAD recovery path too). Whole-script timeout's documented
+      worst-case sum raised 108s->113s in the comment above
+      MODEM_CHAT_SCRIPT_DEFINE (actual 120s timeout value unchanged -
+      still has margin). Not yet verified on hardware - next test after
+      this build.
