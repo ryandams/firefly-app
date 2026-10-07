@@ -23,11 +23,23 @@ patches:
       existing abort_matches same as any other step), so removing a wait with
       no known justification isn't removing error handling, just an
       unverified safety margin. One change at a time per the user's explicit
-      request - not yet hardware-verified. If CIMI/%ICCID start failing or
-      returning garbled/empty values, try a smaller nonzero delay (~100ms)
-      before reverting to the original 500ms. Not upstreamable as-is: this is
-      an experimental removal pending hardware confirmation, not a verified
-      fix to propose back to Nordic.
+      request. If CIMI/%ICCID ever start failing or returning garbled/empty
+      values on different hardware/firmware, try a smaller nonzero delay
+      (~100ms) before reverting to the original 500ms. Not upstreamable
+      as-is: verified on only one unit/SIM/firmware combination so far, not
+      broadly enough to propose back to Nordic.
+
+      CONFIRMED on hardware (2026-10-07, 4 consecutive rounds, all
+      result=0): AT+CIMI returned a valid IMSI in ~8.5ms and AT%ICCID a
+      valid ICCID in ~9.4ms, every round - zero ERROR responses, zero
+      garbled/empty values. nordic_nrf93m1_network_chat_script's own
+      duration dropped from ~537ms to ~37ms, recovering essentially the
+      full 500ms with no observed downside. Combined with the same test's
+      confirmation that the echo-confirmed-send path now actually gets an
+      echo (user fixed the test server's echo response separately - see
+      project memory), total round time dropped to 4450/4890/5180/5038ms
+      (~4890ms average), down from ~5665ms right after the upstream pin
+      advance and ~5795ms from the original pre-advance baseline.
   - path: zephyr/quectel-eg800z-driver.patch
     sha256sum: f5ebf3cef05b708b54191524ddadac714e80c16a3720f39a49764386fafa08a5
     module: zephyr
