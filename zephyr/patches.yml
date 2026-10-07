@@ -1,4 +1,33 @@
 patches:
+  - path: zephyr/nrf93m1-trim-cimi-settle.patch
+    sha256sum: b99acff78afcc732027a5e734e4af13bb0a9d8adbdf76f6eca69c805dbf2a369
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-10-07
+    upstreamable: false
+    comments: |
+      Drops the upstream MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 500) fixed wait
+      between AT+CFUN=1 and AT+CIMI in nordic_nrf93m1_network_chat_script_cmds
+      (added by sdk-zephyr's "emit modem info" commit, picked up in this
+      project's 2026-10-07 upstream pin advance). That commit's own message
+      ("the SIM card IMSI can only be queried after putting the modem into
+      full functional mode, and even then only after a short delay") never
+      says what the delay is actually protecting against, and there's no
+      documented nRF91-series event to replace it with cleanly: AT%XSIM's
+      unsolicited notification only fires on state *changes*, so subscribing
+      at this point races the UICC already being initialized from boot and
+      risks hanging the whole script for its 10s timeout instead of 500ms -
+      checked and rejected as an alternative. AT+CIMI/AT%ICCID already have
+      their own AT-level failure detection (ERROR is caught by this script's
+      existing abort_matches same as any other step), so removing a wait with
+      no known justification isn't removing error handling, just an
+      unverified safety margin. One change at a time per the user's explicit
+      request - not yet hardware-verified. If CIMI/%ICCID start failing or
+      returning garbled/empty values, try a smaller nonzero delay (~100ms)
+      before reverting to the original 500ms. Not upstreamable as-is: this is
+      an experimental removal pending hardware confirmation, not a verified
+      fix to propose back to Nordic.
   - path: zephyr/quectel-eg800z-driver.patch
     sha256sum: f5ebf3cef05b708b54191524ddadac714e80c16a3720f39a49764386fafa08a5
     module: zephyr

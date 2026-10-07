@@ -1,0 +1,29 @@
+diff --git a/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c b/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
+index eefb7ffd35d..2f4a5634ba1 100644
+--- a/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
++++ b/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
+@@ -38,10 +38,23 @@ MODEM_CHAT_SCRIPT_DEFINE(nordic_nrf93m1_init_chat_script, nordic_nrf93m1_init_ch
+ /* Differs from common `iccid_match` only in the % vs + prefix */
+ MODEM_CHAT_MATCH_DEFINE(nrf93m1_iccid_match, "%ICCID: ", "", modem_cellular_chat_on_iccid);
+ 
++/* firefly 2026-10-07: dropped the upstream MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 500)
++ * here. Upstream's own commit message ("IMSI can only be queried after CFUN=1,
++ * and even then only after a short delay") never says what the 500ms is
++ * actually waiting for, and nRF91-series modems have no documented event
++ * (checked AT%XSIM UICC-state notification - a real candidate, but it only
++ * reports *changes*, so subscribing here races the SIM already being ready
++ * from boot and can hang the whole script for the 10s script timeout instead
++ * of 500ms) that cleanly replaces a blind wait inside this driver's linear
++ * chat-script model. AT+CIMI already has its own failure path (ERROR is
++ * visible to abort_matches same as any other step), so this is a bet that
++ * the delay was conservative margin, not a hard requirement - needs hardware
++ * confirmation that CIMI/%ICCID still succeed every round. Revert to a
++ * shorter nonzero value (try ~100ms before reverting all the way to 500ms)
++ * if they start failing or returning garbled/empty values. */
+ MODEM_CHAT_SCRIPT_CMDS_DEFINE(nordic_nrf93m1_network_chat_script_cmds,
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=2", ok_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
+-			      MODEM_CHAT_SCRIPT_CMD_RESP_NONE("", 500),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CIMI", cimi_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT%ICCID", nrf93m1_iccid_match),
