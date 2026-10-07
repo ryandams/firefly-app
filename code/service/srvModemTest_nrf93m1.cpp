@@ -225,7 +225,6 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
     static const char kPrefix[] = "mfw_nrf93m1_";
     char buffer[kRxSize]{};
     size_t used = 0;
-    bool found = false;
     const int64_t tx = k_uptime_get();
     printk("  TX [%8.4f] AT+CGMR\n", seconds(tx - s.t0));
     uart_write("AT+CGMR");
@@ -241,20 +240,26 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
             buffer[used++] = static_cast<char>(byte);
             buffer[used] = '\0';
         }
-        if (!found) {
-            const char *p = strstr(buffer, kPrefix);
-            if (p != nullptr) {
-                p += strlen(kPrefix);
-                size_t i = 0;
-                while (p[i] != '\0' && p[i] != '\r' && p[i] != '\n' && i + 1 < out_size) {
-                    out[i] = p[i];
-                    ++i;
-                }
-                out[i] = '\0';
-                found = true;
-            }
+        // Wait for the whole response (prefix line + "OK") before scanning,
+        // rather than extracting the instant the prefix match completes -
+        // byte-at-a-time, the version digits that follow the prefix have
+        // not arrived in the buffer yet at that exact moment, which is
+        // exactly what made the first version of this function always
+        // capture an empty string (confirmed on real hardware).
+        if (contains(buffer, "OK")) { break; }
+    }
+    out[0] = '\0';
+    bool found = false;
+    const char *p = strstr(buffer, kPrefix);
+    if (p != nullptr) {
+        p += strlen(kPrefix);
+        size_t i = 0;
+        while (p[i] != '\0' && p[i] != '\r' && p[i] != '\n' && i + 1 < out_size) {
+            out[i] = p[i];
+            ++i;
         }
-        if (found && contains(buffer, "OK")) { break; }
+        out[i] = '\0';
+        found = (i > 0);
     }
     printk("  RX [%8.4f] AT+CGMR -> %s | complete %7.1f ms\n", seconds(k_uptime_get() - s.t0),
            found ? out : "(no match)", static_cast<double>(k_uptime_get() - tx));
