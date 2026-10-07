@@ -124,6 +124,68 @@ config FIREFLY_MODEM_TEST_RX_WAIT_MS
 	default 1000
 	range 1 60000
 
+config FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	bool "nRF93M1 HTTP FOTA firmware update on Button 2"
+	depends on FIREFLY_MODEM_TEST_NRF93M1
+	default n
+	help
+	  When set, Button 2 (bus index 1) runs an AT%HTTPFOTADL firmware-version
+	  check and update instead of srvModemTest_nrf93m1's normal PSM-cycle
+	  test. Intended as a one-time provisioning step over the raw AT pipe,
+	  run before switching this board over to FIREFLY_NETWORK for normal
+	  srvNetwork use - the modem's own HTTP client does the download using
+	  its own internal IP stack, so no PPP/CMUX is ever brought up for this.
+
+config FIREFLY_MODEM_FW_UPDATE_FROM_VERSION
+	string "Required current modem firmware version"
+	depends on FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	default "1.4.1"
+	help
+	  AT+CGMR's reported version (after the "mfw_nrf93m1_" prefix) must match
+	  this exactly before the update runs - the delta package named by
+	  FIREFLY_MODEM_FW_UPDATE_URL is only valid from this specific starting
+	  version. If the modem reports anything else, the round logs the
+	  mismatch and skips the download rather than applying a delta meant for
+	  a different base image.
+
+config FIREFLY_MODEM_FW_UPDATE_TO_VERSION
+	string "Expected modem firmware version after the update"
+	depends on FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	default "1.5.0"
+	help
+	  Used only to confirm success: after the module's own post-FOTA reboot,
+	  AT+CGMR is read again and compared against this value.
+
+config FIREFLY_MODEM_FW_UPDATE_URL
+	string "HTTP(S) URL of the delta firmware update package"
+	depends on FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	default "http://firmware.nrfcloud.com/93m1/mfw_nrf93m1_update_from_1.4.1_to_1.5.0.bin"
+	help
+	  Passed verbatim as AT%HTTPFOTADL's first argument. Must start with
+	  http:// or https:// and match the FROM/TO version pair above - this is
+	  the Nordic-hosted delta image for exactly that version transition.
+
+config FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S
+	int "Firmware download+verify timeout in seconds"
+	depends on FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	default 180
+	range 10 900
+	help
+	  How long to wait for the %HTTPURC: "FOTA","VERIFIED" line after sending
+	  AT%HTTPFOTADL, before giving up. Covers the HTTP download and the
+	  module's own signature verification, not the reboot/apply step that
+	  follows VERIFIED - see FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S for that.
+
+config FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S
+	int "Post-update modem reboot wait in seconds"
+	depends on FIREFLY_MODEM_FW_UPDATE_NRF93M1
+	default 60
+	range 5 300
+	help
+	  After %HTTPURC: "FOTA","VERIFIED", the module reboots and applies the
+	  delta during its own bootloader phase on its own - this bounds how
+	  long to poll "AT" afterward before concluding the reboot failed.
+
 choice FIREFLY_NETWORK_TRANSPORT
 	prompt "srvNetwork modem transport"
 	depends on FIREFLY_NETWORK

@@ -49,8 +49,6 @@ const struct gpio_dt_spec kDtr = GPIO_DT_SPEC_GET(MODEM_NODE, mdm_dtr_gpios);
 #endif
 
 constexpr int64_t kPollMs = 2;
-constexpr int kPsmCycleCount = 5;
-constexpr int kPsmIdleSeconds = 60;
 constexpr size_t kRxSize = 2048;
 constexpr size_t kUartRxBufferSize = 256;
 constexpr size_t kUartRxBufferCount = 4;
@@ -211,6 +209,56 @@ int send_at(RunState &s, const char *command, const char *expected = "OK",
         return -ETIMEDOUT;
     }
     return matched ? 0 : -ETIMEDOUT;
+}
+
+// Sends AT+CGMR and extracts the version suffix from the module's
+// "mfw_nrf93m1_<version>" response line (confirmed exact format via
+// nordicsemi_search_sources - the nRF93M1 "Updating the modem firmware"
+// guide's own worked example: "AT+CGMR" -> "mfw_nrf93m1_1.5.0" -> "OK").
+// send_at()/read_until() only report whether one fixed expected substring
+// appeared, not the text actually received - this is the one place that
+// needs the real value, not just a match/no-match, so it duplicates
+// read_until()'s byte-at-a-time ring-buffer loop rather than extending
+// that shared helper's signature for a single caller.
+bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_ms = 5000)
+{
+    static const char kPrefix[] = "mfw_nrf93m1_";
+    char buffer[kRxSize]{};
+    size_t used = 0;
+    bool found = false;
+    const int64_t tx = k_uptime_get();
+    printk("  TX [%8.4f] AT+CGMR\n", seconds(tx - s.t0));
+    uart_write("AT+CGMR");
+    uart_write("\r");
+    const int64_t deadline = k_uptime_get() + timeout_ms;
+    while (k_uptime_get() < deadline) {
+        uint8_t byte;
+        if (ring_buf_get(&g_uart_rx_ring, &byte, 1) != 1) {
+            k_sleep(K_MSEC(kPollMs));
+            continue;
+        }
+        if (used + 1 < sizeof(buffer)) {
+            buffer[used++] = static_cast<char>(byte);
+            buffer[used] = '\0';
+        }
+        if (!found) {
+            const char *p = strstr(buffer, kPrefix);
+            if (p != nullptr) {
+                p += strlen(kPrefix);
+                size_t i = 0;
+                while (p[i] != '\0' && p[i] != '\r' && p[i] != '\n' && i + 1 < out_size) {
+                    out[i] = p[i];
+                    ++i;
+                }
+                out[i] = '\0';
+                found = true;
+            }
+        }
+        if (found && contains(buffer, "OK")) { break; }
+    }
+    printk("  RX [%8.4f] AT+CGMR -> %s | complete %7.1f ms\n", seconds(k_uptime_get() - s.t0),
+           found ? out : "(no match)", static_cast<double>(k_uptime_get() - tx));
+    return found;
 }
 
 int wait_for_sim_ready(RunState &s)
@@ -374,7 +422,8 @@ int power_up_modem()
 // fresh boot hanging indefinitely instead of timing out. Flow control is
 // restored once the modem actually answers "AT", or unconditionally on
 // timeout so a failed wake doesn't leave the UART stuck without it either.
-int wait_for_modem_ready(RunState &s, bool mark_ready = true)
+int wait_for_modem_ready(RunState &s, bool mark_ready = true,
+                         int32_t timeout_ms = CONFIG_FIREFLY_MODEM_TEST_READY_TIMEOUT_MS)
 {
     printk("\n=== Waiting for modem ready ===\n");
     struct uart_config config = {
@@ -388,7 +437,7 @@ int wait_for_modem_ready(RunState &s, bool mark_ready = true)
     if (err != 0) { return err; }
 
     bool ready = false;
-    const int64_t deadline = k_uptime_get() + CONFIG_FIREFLY_MODEM_TEST_READY_TIMEOUT_MS;
+    const int64_t deadline = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < deadline) {
         if (send_at(s, "AT", "OK", 300, false) == 0) {
             ready = true;
@@ -444,6 +493,134 @@ int power_down_modem(RunState &s)
 #endif
     return result;
 }
+
+#ifdef CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
+// Button 2 in this build: a one-time AT%HTTPFOTADL firmware check/update,
+// entirely over this raw AT pipe. CONFIG_MODEM=n in this build mode means
+// modem_cellular.c is not even compiled in, and the update itself needs no
+// PPP/CMUX either - confirmed via nordicsemi_search_sources (the nRF93M1
+// "Updating the modem firmware" and "Features" guides) that %HTTPFOTADL
+// downloads, verifies, and applies the delta entirely inside the module's
+// own IP/HTTP stack ("a host without its own IP stack can still use TCP and
+// UDP sockets"), using whatever PDP context AT+CFUN=1 attaches with - no
+// host-side PPP/socket involvement at all.
+//
+// Setup sequence (CGDCONT/COPS/CFUN=1/registration wait) mirrors run_test()
+// above rather than inventing a new one. Per the AT Commands Reference
+// confirmed via the same search: the module boots at CFUN=0 and does not
+// attach on its own, so AT+CFUN=1 (after CGDCONT/COPS) is required before
+// registration - or the HTTP download - can happen.
+int run_firmware_update()
+{
+    RunState s{};
+    s.t0 = k_uptime_get();
+    int err = 0;
+    const char *outcome = "FAILED";
+#define REQUIRED(expr) do { err = (expr); if (err != 0) { goto done; } } while (0)
+
+    printk("\n=== Power up ===\n");
+    REQUIRED(power_up_modem());
+    REQUIRED(wait_for_modem_ready(s));
+
+    printk("\n=== Setup (untimed) ===\n");
+    REQUIRED(send_at(s, "ATE0"));
+    {
+        char command[96];
+        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"",
+                 CONFIG_FIREFLY_MODEM_TEST_APN);
+        REQUIRED(send_at(s, command));
+    }
+    REQUIRED(send_at(s, "AT+COPS=0"));
+    REQUIRED(send_at(s, "AT+CEREG=2"));
+
+    printk("\n=== RF on ===\n");
+    REQUIRED(send_at(s, "AT+CFUN=1"));
+
+    printk("\n=== Waiting for +CEREG URC ===\n");
+    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true)) {
+        printk("Network registration timed out\n");
+        err = -ETIMEDOUT;
+        goto done;
+    }
+
+    printk("\n=== Checking current firmware version ===\n");
+    {
+        char current[32] = {0};
+        if (!read_cgmr_version(s, current, sizeof(current))) {
+            printk("Could not read AT+CGMR - aborting update\n");
+            err = -EIO;
+            goto done;
+        }
+        printk("  current modem firmware: mfw_nrf93m1_%s\n", current);
+
+        // Delta images are relative to one specific starting version (per
+        // the same Nordic guide), so a mismatch here means the configured
+        // URL's package would not apply cleanly - skip rather than guess.
+        if (strcmp(current, CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION) != 0) {
+            printk("  expected mfw_nrf93m1_%s - not updating\n",
+                   CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION);
+            outcome = "NO-OP (version mismatch)";
+            err = 0;
+            goto done;
+        }
+
+        printk("\n=== Downloading and verifying update (up to %d s) ===\n",
+               CONFIG_FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S);
+        {
+            char command[300];
+            snprintk(command, sizeof(command), "AT%%HTTPFOTADL=\"%s\",100",
+                     CONFIG_FIREFLY_MODEM_FW_UPDATE_URL);
+            // "OK" here only means the command was accepted, not that the
+            // download succeeded - the real outcome comes via the
+            // %HTTPURC: "FOTA",... lines read_until() waits for next.
+            REQUIRED(send_at(s, command, "OK", 10000));
+        }
+        if (!read_until(s, "VERIFIED",
+                        CONFIG_FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S * 1000)) {
+            printk("Did not see %%HTTPURC \"FOTA\",\"VERIFIED\" in time - see the RX\n"
+                   "lines above for what the modem actually reported (a\n"
+                   "DOWNLOAD ERROR or VERIFICATION FAILURE detail, if any,\n"
+                   "was already printed live as it arrived).\n");
+            err = -ETIMEDOUT;
+            goto done;
+        }
+
+        printk("\n=== Verified - waiting for the module's own reboot (up to %d s) ===\n",
+               CONFIG_FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S);
+        // The module reboots and applies the delta on its own here - this
+        // is not a power-key wake, just re-polling "AT" until it answers
+        // again, same as wait_for_modem_ready()'s normal job.
+        flush_rx();
+        REQUIRED(wait_for_modem_ready(s, false,
+                                      CONFIG_FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S * 1000));
+
+        char updated[32] = {0};
+        if (!read_cgmr_version(s, updated, sizeof(updated))) {
+            printk("Modem came back but AT+CGMR did not respond as expected\n");
+            err = -EIO;
+            goto done;
+        }
+        printk("  modem firmware is now: mfw_nrf93m1_%s\n", updated);
+        if (strcmp(updated, CONFIG_FIREFLY_MODEM_FW_UPDATE_TO_VERSION) == 0) {
+            outcome = "SUCCESS";
+        } else {
+            outcome = "FAILED (unexpected version after update)";
+            err = -EIO;
+        }
+    }
+
+done:
+    // Always attempted, even after an earlier failure - a firmware-update
+    // round should not leave the modem sitting powered on indefinitely.
+    printk("\n=== Power down ===\n");
+    power_down_modem(s);
+    printk("\n====================================================================\n");
+    printk("FIRMWARE UPDATE RESULT: %s\n", (err == 0) ? outcome : "FAILED");
+    printk("====================================================================\n");
+    return err;
+#undef REQUIRED
+}
+#endif // CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
 
 int run_test()
 {
@@ -556,6 +733,15 @@ done:
     return err;
 #undef REQUIRED
 }
+
+#ifndef CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
+// Button 2 runs run_firmware_update() instead when that Kconfig is set (see
+// its own definition above and the dispatch in SrvModemTest::run() below) -
+// guarded out entirely rather than just unreachable, so it (and these two
+// constants, used only here) do not trigger unused-symbol warnings in that
+// build.
+constexpr int kPsmCycleCount = 5;
+constexpr int kPsmIdleSeconds = 60;
 
 // One PSM cycle's socket work: wake the modem, fresh socket, connect,
 // send, wait for a reply, then delete the socket so the next cycle
@@ -742,6 +928,7 @@ done:
     return err;
 #undef REQUIRED
 }
+#endif // !CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
 
 #endif
 
@@ -779,7 +966,10 @@ protected:
         // labels (1-based): silkscreen "Button 1" = button0 = index 0,
         // "Button 2" = button1 = index 1. This board has no third button.
         printk("srvModemTest_nrf93m1 ready - waiting for Button 1 (single round) / "
-               "Button 2 (PSM cycle)\n");
+               "Button 2 (%s)\n",
+               IS_ENABLED(CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1)
+                   ? "firmware update"
+                   : "PSM cycle");
         while (!shouldStop()) {
             const struct zbus_channel *channel = nullptr;
             struct bus_msg message{};
@@ -792,7 +982,11 @@ protected:
             if (button != 0 && button != 1) { continue; }
 #ifdef CONFIG_FIREFLY_MODEM_TEST_NRF93M1
             k_mutex_lock(&g_modem_lock, K_FOREVER);
+#ifdef CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
+            last_result_ = (button == 0) ? run_test() : run_firmware_update();
+#else
             last_result_ = (button == 0) ? run_test() : run_psm_cycle_test();
+#endif
             k_mutex_unlock(&g_modem_lock);
 #else
             last_result_ = -ENOSYS;
