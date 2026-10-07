@@ -1,6 +1,6 @@
 patches:
   - path: zephyr/quectel-eg800z-driver.patch
-    sha256sum: 1a4ba919239b85eaa2e1b2c0d62b921cad492d14085e385715bf849ce3c6d940
+    sha256sum: f5ebf3cef05b708b54191524ddadac714e80c16a3720f39a49764386fafa08a5
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -15,8 +15,28 @@ patches:
       drivers/modem/vendor_modem_cellular/CMakeLists.txt and adds
       DT_HAS_QUECTEL_EG800Z_ENABLED to Kconfig.cellular's CMUX-MTU-127
       select list alongside the other 127-byte-DLCI modems.
+
+      2026-10-07 update: re-ported onto the upstream pin advance (sdk-nrf
+      main 2026-08-12 -> 2026-10-07). The two wiring hunks needed
+      adjustment - both lists grew several new vendor entries upstream in
+      the meantime (Telit LE910C1TX/LEX10Q1, Trasna LEXI-R10, Quectel
+      EG915U, Nordic nRF93M1 itself joining Kconfig.cellular's
+      CMUX-MTU-127 list) - re-inserted DT_HAS_QUECTEL_EG800Z_ENABLED/
+      cellular_quectel_eg800z.c in the correct alphabetically-sorted
+      position in each. One real fix was also needed in the driver file
+      itself: MODEM_DT_INST_PPP_DEFINE dropped its separate RX/TX
+      buffer-size parameters for a single shared one upstream, breaking
+      this driver's old 6-argument call (mtu=98, rx=1500, tx=64) with a
+      macro-arity compile error - collapsed to the larger of the two old
+      buffer sizes (1500) rather than the smaller, since shrinking RX
+      below 1500 risks truncating real inbound PPP frames; mtu=98 left
+      unchanged. This instance still has no devicetree node enabling it in
+      this project (superseded by modemEg800zPpp.cpp's custom transport
+      once AT+CMUX was found unsupported on this modem), so the fix is a
+      compile-arity correction only, not a hardware-verified behavior
+      change - devicetree binding unaffected, byte-identical to before.
   - path: zephyr/modem-cellular-power-off-pulse.patch
-    sha256sum: 2dfdb87c8bc6029e848cce71b4c394b8059dcf49445adf202c446bea23f5bb1f
+    sha256sum: dcc5c67f48c42bafd72072a0136b13c9db6ef57795a3153823f68d64ccd5051e
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -67,7 +87,7 @@ patches:
       fibocom-le270-driver.patch's own changelog for the LE270-side value
       chosen and verification status.
   - path: zephyr/modem-cellular-suspend-during-ppp-dead.patch
-    sha256sum: 92ae88ad3bd10ee5b1dc4489009b0d00c32dfd281718a04c4d12602f6524fdbb
+    sha256sum: 538b471d971edb8285967705b1487fd85862ec17f66f789cd4dccd0c658b6a2f
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -125,7 +145,7 @@ patches:
       proven cleanup path) specifically so it can be verified in isolation
       before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: e56c3c5b2b65d5c8716cd28a23c260b792ebf7548260cc6f0cdbc769d776141b
+    sha256sum: ce2407158af6fe98771cb4890b92dd18c9ea693c76f6dc6ace31cb10e5f34c98
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io
@@ -765,3 +785,33 @@ patches:
       MODEM_CHAT_SCRIPT_DEFINE (actual 120s timeout value unchanged -
       still has margin). Not yet verified on hardware - next test after
       this build.
+
+      2026-10-07 update: re-ported onto the upstream pin advance (sdk-nrf
+      main 2026-08-12 -> 2026-10-07). Wiring hunks (Kconfig.cellular,
+      CMakeLists.txt) needed the same re-insertion as quectel-eg800z-
+      driver.patch's own 2026-10-07 update, for the same reason (several
+      new vendor entries landed upstream in the meantime). Two real
+      changes in the driver file itself, not just re-basing:
+      (1) shutdown_cmux_settle_ms (a firefly-only vendor-config field from
+      Change 5, see modem-cellular-power-off-pulse.patch) is now redundant
+      - this pin advance adds the identical mechanism natively as
+      cmux_disconnect_timeout_ms (same fallback-to-reset_pulse_duration_ms
+      -when-0 pattern, same code location in modem_cellular.c, confirmed
+      by reading the new source directly) - switched .shutdown_cmux_settle_ms
+      = 20 to .cmux_disconnect_timeout_ms = 20 and dropped the firefly-only
+      field from the power-off-pulse patch entirely. (2) MODEM_DT_INST_PPP_
+      DEFINE dropped its separate RX/TX buffer-size params for one shared
+      value upstream, breaking this driver's old 6-argument call (mtu=98,
+      rx=1500, tx=64) with a macro-arity compile error - collapsed to the
+      larger buffer size (1500) rather than the smaller, for the same
+      no-truncation reasoning as quectel-eg800z-driver.patch's identical
+      fix; mtu=98 left unchanged (the value this driver has actually been
+      hardware-verified against all session, not something an arity-only
+      fix should also second-guess). All three build targets (nRF93M1,
+      EG800Z, LE270) rebuilt clean after this re-port; LE270 is the only
+      one that exercises this driver, so change (2) is not yet
+      hardware-verified - next hardware test should confirm no regression
+      in the already-verified round timings (6 CMUX-connect-settle/CMUX-
+      disconnect-timeout acceptance criteria from Changes 5/6 above both
+      depend on exact values that are unchanged by this re-port, only
+      renamed/relocated).

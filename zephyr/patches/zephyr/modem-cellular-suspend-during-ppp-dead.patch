@@ -1,8 +1,8 @@
 diff --git a/drivers/modem/modem_cellular.c b/drivers/modem/modem_cellular.c
-index 49db4240526..a822975e745 100644
+index bab3fc6a60d..10ec2156caf 100644
 --- a/drivers/modem/modem_cellular.c
 +++ b/drivers/modem/modem_cellular.c
-@@ -1499,6 +1499,30 @@ static void modem_cellular_await_ppp_dead_event_handler(struct modem_cellular_da
+@@ -1755,6 +1755,34 @@ static void modem_cellular_await_ppp_dead_event_handler(struct modem_cellular_da
  			modem_cellular_enter_state(data, MODEM_CELLULAR_STATE_RUN_DIAL_SCRIPT);
  		}
  		break;
@@ -20,14 +20,18 @@ index 49db4240526..a822975e745 100644
 +		 * application's actual shutdown request - observed on real
 +		 * hardware as several minutes of automatic redial attempts after
 +		 * a round had already reported success, ending in a shutdown
-+		 * script timeout once failures were exhausted. No manual cleanup
-+		 * needed here: modem_cellular_enter_state() always calls the
-+		 * current state's own _leave() function first, and
-+		 * on_await_ppp_dead_state_leave() below already does exactly the
-+		 * net_if_carrier_off/modem_chat_release/modem_ppp_release cleanup
-+		 * this needs, same as every other SUSPEND-handling state in this
-+		 * file already relies on for whatever cleanup their own state
-+		 * requires. */
++		 * script timeout once failures were exhausted. Still present as
++		 * of the 2026-10-07 upstream pin advance (sdk-nrf main ->
++		 * 2026-10-07): that pass added a MODEM_CELLULAR_EVENT_PPP_DEAD
++		 * redial-delay fix to the REGISTERED state's own handler, but did
++		 * not add a SUSPEND case here, so this gap is unrelated and still
++		 * open. No manual cleanup needed here: modem_cellular_enter_state()
++		 * always calls the current state's own _leave() function first,
++		 * and on_await_ppp_dead_state_leave() below already does exactly
++		 * the net_if_carrier_off/modem_chat_release/modem_ppp_release
++		 * cleanup this needs, same as every other SUSPEND-handling state
++		 * in this file already relies on for whatever cleanup their own
++		 * state requires. */
 +		modem_cellular_enter_state(data, MODEM_CELLULAR_STATE_INIT_POWER_OFF);
 +		break;
  	default:

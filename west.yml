@@ -20,10 +20,18 @@ manifest:
     - name: nrf
       remote: nrfconnect
       repo-path: sdk-nrf
-      # sdk-nrf main on 2026-08-12. Its west.yml pins sdk-zephyr to
-      # 0e25e66118d903037be2350cccc382134b7e62ad, which contains the
-      # nordic,nrf93m1 vendor cellular modem driver.
-      revision: e8b176a4900a560d180112302fc5b48dde19bf70
+      # sdk-nrf main on 2026-10-07. Its west.yml pins sdk-zephyr to
+      # 9ae80f8d469a2a2d83ef62123e0579a6972aced9, which still contains the
+      # nordic,nrf93m1 vendor cellular modem driver plus ~9600 commits of
+      # churn past the previous pin (2026-08-12,
+      # e8b176a4900a560d180112302fc5b48dde19bf70) - including several
+      # nrf93m1-specific driver fixes (custom APN, richer CEREG info, CMUX
+      # disconnect timeout) and generic modem_cellular/PPP fixes that
+      # overlap with bugs this project found and patched independently
+      # (dormant-state tracking, PPP "NO CARRIER" detection, delayed
+      # redial after PPP dies). See project memory for the full commit
+      # list this pin advance was based on.
+      revision: 8c14b7a20662b0f7fc7308d0e67154a66eb0f315
 
       # `import: true` pulls the whole NCS module set.
       #

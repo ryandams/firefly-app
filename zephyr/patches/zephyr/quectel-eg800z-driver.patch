@@ -1,19 +1,18 @@
 diff --git a/drivers/modem/Kconfig.cellular b/drivers/modem/Kconfig.cellular
-index 1e140b86273..8f65a7fb593 100644
+index 86fa417697c..fca51d37c2b 100644
 --- a/drivers/modem/Kconfig.cellular
 +++ b/drivers/modem/Kconfig.cellular
-@@ -21,7 +21,8 @@ config MODEM_CELLULAR
- 		 DT_HAS_U_BLOX_SARA_R4_ENABLED || DT_HAS_U_BLOX_SARA_R5_ENABLED || \
- 		 DT_HAS_SWIR_HL7800_ENABLED || DT_HAS_TELIT_ME910G1_ENABLED || \
- 		 DT_HAS_TELIT_ME310G1_ENABLED || DT_HAS_SQN_GM02S_ENABLED || \
--		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_SIMCOM_A76XX_ENABLED)
-+		 DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_QUECTEL_EG800Z_ENABLED || \
-+		 DT_HAS_SIMCOM_A76XX_ENABLED)
+@@ -24,7 +24,7 @@ config MODEM_CELLULAR
+ 		DT_HAS_TELIT_LEX10Q1_ENABLED || DT_HAS_SQN_GM02S_ENABLED || \
+ 		DT_HAS_QUECTEL_EG800Q_ENABLED || DT_HAS_SIMCOM_A76XX_ENABLED || \
+ 		DT_HAS_TRASNA_LEXI_R10_ENABLED || DT_HAS_QUECTEL_EG915U_ENABLED || \
+-		DT_HAS_NORDIC_NRF93M1_ENABLED)
++		DT_HAS_NORDIC_NRF93M1_ENABLED || DT_HAS_QUECTEL_EG800Z_ENABLED)
  	help
  	  This driver uses the generic 3gpp AT commands, along
  	  with the standard protocols CMUX and PPP, to configure
 diff --git a/drivers/modem/vendor_modem_cellular/CMakeLists.txt b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
-index 3ee0554d965..a8b0958af92 100644
+index 7b382c17569..415a89a7610 100644
 --- a/drivers/modem/vendor_modem_cellular/CMakeLists.txt
 +++ b/drivers/modem/vendor_modem_cellular/CMakeLists.txt
 @@ -12,6 +12,7 @@ zephyr_library_sources_ifdef(CONFIG_DT_HAS_NORDIC_NRF91_SLM_ENABLED cellular_nor
@@ -21,15 +20,15 @@ index 3ee0554d965..a8b0958af92 100644
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG25_G_ENABLED cellular_quectel_eg25_g.c)
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG800Q_ENABLED cellular_quectel_eg800q.c)
 +zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG800Z_ENABLED cellular_quectel_eg800z.c)
+ zephyr_library_sources_ifdef(CONFIG_DT_HAS_QUECTEL_EG915U_ENABLED cellular_quectel_eg915u.c)
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SIMCOM_A76XX_ENABLED cellular_simcom_a76xx.c)
  zephyr_library_sources_ifdef(CONFIG_DT_HAS_SIMCOM_SIM7080_ENABLED cellular_simcom_sim7080.c)
- zephyr_library_sources_ifdef(CONFIG_DT_HAS_SQN_GM02S_ENABLED cellular_sqn_gm02s.c)
 diff --git a/drivers/modem/vendor_modem_cellular/cellular_quectel_eg800z.c b/drivers/modem/vendor_modem_cellular/cellular_quectel_eg800z.c
 new file mode 100644
-index 00000000000..9bd475bb439
+index 00000000000..d1f681f3ea3
 --- /dev/null
 +++ b/drivers/modem/vendor_modem_cellular/cellular_quectel_eg800z.c
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,134 @@
 +/*
 + * Copyright (c) 2026 GS Fleet
 + *
@@ -142,8 +141,16 @@ index 00000000000..9bd475bb439
 +	.shutdown_time_ms = 10000,
 +};
 +
++/* 2026-10-07 upstream pin advance (sdk-nrf main -> 2026-10-07):
++ * MODEM_DT_INST_PPP_DEFINE dropped its separate RX/TX buffer-size params for
++ * a single shared _buf_size. Kept the larger of the old RX=1500/TX=64 split
++ * (see cellular_fibocom_le270.c's identical fix for the full reasoning);
++ * mtu=98 unchanged. This instance currently has no devicetree node enabling
++ * it in this project (superseded by modemEg800zPpp.cpp's custom transport
++ * once AT+CMUX was found unsupported on this modem - see patches.yml), so
++ * this is an arity fix only, not a hardware-verified behavior change. */
 +#define MODEM_CELLULAR_DEVICE_QUECTEL_EG800Z(inst)                                                 \
-+	MODEM_DT_INST_PPP_DEFINE(inst, MODEM_CELLULAR_INST_NAME(ppp, inst), NULL, 98, 1500, 64);   \
++	MODEM_DT_INST_PPP_DEFINE(inst, MODEM_CELLULAR_INST_NAME(ppp, inst), NULL, 98, 1500);       \
 +                                                                                                   \
 +	static struct modem_cellular_data MODEM_CELLULAR_INST_NAME(data, inst) = {                 \
 +		.chat_delimiter = "\r",                                                            \

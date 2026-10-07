@@ -1,9 +1,9 @@
 diff --git a/drivers/modem/modem_cellular.c b/drivers/modem/modem_cellular.c
-index 49db4240526..7e2944ed8b6 100644
+index bab3fc6a60d..1299245d7d4 100644
 --- a/drivers/modem/modem_cellular.c
 +++ b/drivers/modem/modem_cellular.c
-@@ -1050,11 +1050,16 @@ static void modem_cellular_run_init_script_event_handler(struct modem_cellular_d
- 
+@@ -1192,11 +1192,16 @@ static void modem_cellular_run_init_script_event_handler(struct modem_cellular_d
+
  static int modem_cellular_on_connect_cmux_state_enter(struct modem_cellular_data *data)
  {
 +	const struct modem_cellular_config *config = data->dev->config;
@@ -19,77 +19,52 @@ index 49db4240526..7e2944ed8b6 100644
 +	modem_cellular_start_timer(data, K_MSEC(settle_ms));
  	return 0;
  }
- 
-@@ -1526,12 +1531,17 @@ static void modem_cellular_init_power_off_event_handler(struct modem_cellular_da
- 	const struct modem_cellular_config *config = data->dev->config;
- 
- 	switch (evt) {
--	case MODEM_CELLULAR_EVENT_CMUX_DISCONNECTED:
-+	case MODEM_CELLULAR_EVENT_CMUX_DISCONNECTED: {
-+		uint16_t settle_ms = config->vendor->shutdown_cmux_settle_ms != 0
-+			? config->vendor->shutdown_cmux_settle_ms
-+			: config->vendor->reset_pulse_duration_ms;
-+
- 		modem_cellular_stop_timer(data);
- 		data->cmd_pipe = data->uart_pipe;
--		/* Assume the same time as reset pulse is enough to return from CMUX to AT mode */
--		modem_cellular_start_timer(data, K_MSEC(config->vendor->reset_pulse_duration_ms));
-+		/* Assume this settle time is enough to return from CMUX to AT mode */
-+		modem_cellular_start_timer(data, K_MSEC(settle_ms));
- 		break;
-+	}
- 	case MODEM_CELLULAR_EVENT_TIMEOUT:
- 		/* Shutdown script can only be used if cmd_pipe is available, i.e. we are not in
- 		 * some intermediary state without a pipe for commands available
-@@ -1597,10 +1607,13 @@ static int modem_cellular_on_run_shutdown_script_state_leave(struct modem_cellul
+
+@@ -1876,10 +1881,13 @@ static int modem_cellular_on_run_shutdown_script_state_leave(struct modem_cellul
  static int modem_cellular_on_power_off_pulse_state_enter(struct modem_cellular_data *data)
  {
  	const struct modem_cellular_config *config = data->dev->config;
 +	const uint16_t pulse_ms = (config->vendor->power_off_pulse_duration_ms != 0)
 +					   ? config->vendor->power_off_pulse_duration_ms
 +					   : config->vendor->power_pulse_duration_ms;
- 
+
  	data->cmd_pipe = NULL;
  	gpio_pin_set_dt(&config->power_gpio, 1);
 -	modem_cellular_start_timer(data, K_MSEC(config->vendor->power_pulse_duration_ms));
 +	modem_cellular_start_timer(data, K_MSEC(pulse_ms));
  	return 0;
  }
- 
+
 diff --git a/include/zephyr/drivers/modem/modem_cellular.h b/include/zephyr/drivers/modem/modem_cellular.h
-index f1444b390c5..ed09428da70 100644
+index aac7fd86b96..00f58a0bff2 100644
 --- a/include/zephyr/drivers/modem/modem_cellular.h
 +++ b/include/zephyr/drivers/modem/modem_cellular.h
-@@ -221,7 +221,32 @@ struct modem_cellular_vendor_config {
- 		uint16_t size;
+@@ -287,6 +287,14 @@ struct modem_cellular_vendor_config {
  	} unsol_matches;
+ 	/** Duration of the modem power-key pulse, in milliseconds. */
  	uint16_t power_pulse_duration_ms;
-+	/* Power-off PWRKEY pulse duration, if it differs from the power-on
-+	 * pulse above (0 means "same as power_pulse_duration_ms" - every
-+	 * existing vendor driver leaves this at 0 and is unaffected). Added
-+	 * because some modems document different minimum pulse widths for
-+	 * power-on vs power-off (e.g. >=650ms on vs >=3.1s off), which a
-+	 * single shared duration can't satisfy without either an
-+	 * unnecessarily long power-on pulse or a too-short power-off one. */
++	/** Duration of the modem power-key pulse used for power-OFF, in milliseconds, if it
++	 * differs from @c power_pulse_duration_ms above. Defaults to @c power_pulse_duration_ms
++	 * if not specified (value == 0U). Some modems document meaningfully different minimum
++	 * PWRKEY pulse widths for power-on vs power-off, which a single shared duration can't
++	 * satisfy without either an unnecessarily long power-on pulse or a too-short,
++	 * unreliable power-off one.
++	 */
 +	uint16_t power_off_pulse_duration_ms;
+ 	/** Duration of the modem reset pulse, in milliseconds. */
  	uint16_t reset_pulse_duration_ms;
-+	/* Settle time between CMUX fully disconnecting and the shutdown script
-+	 * being allowed to run over the plain (un-multiplexed) AT pipe (0 means
-+	 * "same as reset_pulse_duration_ms" - every existing vendor driver
-+	 * leaves this at 0 and is unaffected). Split out because
-+	 * reset_pulse_duration_ms is often tied to a vendor's documented
-+	 * RESET_N pulse width, which has no relation to how long the UART
-+	 * actually needs after CMUX teardown before it reliably accepts
-+	 * un-multiplexed AT commands again - a single shared duration can't be
-+	 * tuned for one purpose without also changing the other. */
-+	uint16_t shutdown_cmux_settle_ms;
-+	/* Settle time after AT+CMUX's OK before sending the first CMUX SABM
-+	 * frame (0 means "use the hard-coded 100ms default" - every existing
-+	 * vendor driver leaves this at 0 and is unaffected). The 100ms default
-+	 * exists because some modems disable UART RX while switching into CMUX
-+	 * mode; not every modem needs the full 100ms, so this is a per-vendor
-+	 * tunable rather than a global reduction of that default. */
+ 	/** Timeout for the modem to revert from CMUX to AT mode after a CMUX disconnect, in
+@@ -294,6 +302,13 @@ struct modem_cellular_vendor_config {
+ 	 * legacy compatibility.
+ 	 */
+ 	uint16_t cmux_disconnect_timeout_ms;
++	/** Settle time after @c AT+CMUX's OK before sending the first CMUX SABM frame, in
++	 * milliseconds. Defaults to 100 if not specified (value == 0U), matching the behavior
++	 * before this field existed. Some modems disable UART RX while switching into CMUX mode
++	 * and need the full default; others settle faster and can use a shorter, per-vendor
++	 * value here instead of a global reduction of that default.
++	 */
 +	uint16_t cmux_connect_settle_ms;
+ 	/** Maximum modem startup delay, in milliseconds. */
  	uint16_t startup_time_ms;
- 	uint16_t shutdown_time_ms;
- 	/* Force the `autostart` property regardless of devicetree */
+ 	/** Maximum modem shutdown delay, in milliseconds. */

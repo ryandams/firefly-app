@@ -29,7 +29,12 @@
 
 #include <zephyr/modem/ppp.h>
 
-MODEM_PPP_DEFINE(modem_eg800z_ppp, NULL, 98, 1500, 1500);
+/* 2026-10-07 upstream pin advance (sdk-nrf main -> 2026-10-07): MODEM_PPP_DEFINE
+ * dropped its separate RX/TX buffer-size params for a single shared _buf_size.
+ * This instance's RX and TX were already both 1500, so collapsing to one
+ * argument is a pure mechanical re-arity - mtu=98 and buf_size=1500 are
+ * unchanged from before. */
+MODEM_PPP_DEFINE(modem_eg800z_ppp, NULL, 98, 1500);
 
 struct modem_ppp *modemEg800zPpp_ppp(void)
 {
