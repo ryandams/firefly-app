@@ -644,7 +644,16 @@ int run_test()
     // Disables command echo (ATE1 is this modem's power-on default) so the
     // transcript below shows only the modem's actual responses, not our
     // own command bytes echoed back first.
-    REQUIRED(send_at(s, "AT%PMUCFG=1,1"));
+    //
+    // AT%PMUCFG removed 2026-10-07: confirmed via nordicsemi_search_sources
+    // (the nRF93M1 AT Commands Reference) that this is not a documented
+    // nRF93M1 command at all - the real power/module-config command is
+    // %MODULECFG, already used correctly elsewhere in this file (see
+    // run_psm_cycle_test()'s "ledMode"/"usbCtrl"/etc. calls). Firmware 1.4.1
+    // silently tolerated AT%PMUCFG=1,1 as a no-op; after updating to 1.5.0
+    // it started correctly answering ERROR, aborting this REQUIRED() step on
+    // real hardware (confirmed - this was never a valid command on either
+    // version, just inconsistently enforced).
     REQUIRED(send_at(s, "ATE0"));
     REQUIRED(send_at(s, "AT+CMEE=1"));
     REQUIRED(send_at(s, "AT+CFUN=4"));
@@ -777,8 +786,6 @@ int psm_socket_round(RunState &s, int cycle)
     if (err != 0) { return err; }
     err = wait_for_modem_ready(s, false);
     if (err != 0) { return err; }
-    
-    send_at(s, "AT%PMUCFG=1,1");
 
     printk("\n=== PSM cycle %d/%d: socket ===\n", cycle, kPsmCycleCount);
     err = send_at(s, "AT%SKTCREATE=1,2,17");
@@ -846,7 +853,6 @@ int run_psm_cycle_test()
     // transcript below shows only the modem's actual responses, not our
     // own command bytes echoed back first.
     REQUIRED(send_at(s, "ATE0"));
-    REQUIRED(send_at(s, "AT%PMUCFG=1,1"));
     REQUIRED(send_at(s, "AT+CGMR"));
     REQUIRED(send_at(s, "AT+CMEE=1"));
     REQUIRED(send_at(s, "AT+CFUN=4"));
@@ -878,7 +884,6 @@ int run_psm_cycle_test()
     // stays in higher-current RRC-idle after RRC release before the uA-
     // level PSM floor begins.
     printk("\n=== Enable PSM (Active-Time 2s, requested before attach) ===\n");
-    // %PMUCFG=<enable>[,<mode>]
     REQUIRED(send_at(s, "AT%MODULECFG=\"ledMode\",0"));
     REQUIRED(send_at(s, "AT%MODULECFG=\"logCtrl\",0"));
     REQUIRED(send_at(s, "AT%MODULECFG=\"usbCtrl\",2"));
@@ -908,8 +913,13 @@ int run_psm_cycle_test()
         // above; going idle (sending nothing) lets RRC release and
         // Active-Time run their course, and the next cycle's own AT
         // traffic (in psm_socket_round) is what wakes it back up.
-        
-        REQUIRED(send_at(s, "AT%PMUCFG=1,4"));
+        //
+        // AT%PMUCFG=1,4 removed 2026-10-07 along with this file's other
+        // %PMUCFG calls - not a documented nRF93M1 command (confirmed via
+        // nordicsemi_search_sources), so it was never actually doing
+        // anything here; the RRC-release/Active-Time/PSM transition this
+        // comment describes already happens from the module's own natural
+        // behavior once nothing is sent during the idle window below.
         printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n",
                cycle, kPsmCycleCount, kPsmIdleSeconds);
         k_sleep(K_SECONDS(kPsmIdleSeconds));
