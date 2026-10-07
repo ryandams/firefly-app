@@ -1,0 +1,56 @@
+diff --git a/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c b/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
+index 2f4a5634ba1..8f3e9a1c2d0 100644
+--- a/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
++++ b/drivers/modem/vendor_modem_cellular/cellular_nordic_nrf93m1.c
+@@ -20,6 +20,29 @@ MODEM_CHAT_MATCHES_DEFINE(nordic_nrf93m1_unsol, MODEM_CELLULAR_COMMON_UNSOL_MATC
+ 			  MODEM_CHAT_MATCH("RDY", "", modem_cellular_chat_on_modem_ready),
+ 			  MODEM_CHAT_MATCH("%BCINFOSC:", ",", nrf93m1_on_bcinfosc));
+ 
++/* firefly 2026-10-07: AT+CGDCONT and AT+CFUN=1 moved here from the
++ * generic APN script / nordic_nrf93m1_network_chat_script_cmds below, so
++ * the network attach that AT+CFUN=1 triggers runs in the background during
++ * CMUX/DLCI setup instead of serially after it (~0.7s of overlap per a
++ * colleague's Joulescope-based estimate). AT+CFUN=4 must still run first -
++ * Nordic's own "Fix setting custom APN" upstream commit added it specifically
++ * because setting AT+CGDCONT without dropping to flight mode first can leave
++ * a custom APN "not configured properly" on this chipset, and this project
++ * genuinely uses one (gsfleet.cxn). Requires zephyr,use-default-pdp-ctx=1 in
++ * boards/nrf93m1dk_nrf54l15_cpuapp.overlay so modem_cellular.c's generic
++ * RUN_APN_SCRIPT doesn't redundantly resend AT+CGDCONT later - a same-value
++ * rewrite that this project's own LE270 work found can still cost real RF
++ * re-signaling time. The CONFIG_MODEM_CELLULAR_APN string-literal
++ * concatenation below reproduces modem_cellular_build_apn_script()'s own
++ * "AT+CGDCONT=1,\"IP\",\"%s\"" format exactly, just at compile time instead
++ * of runtime - this only supports a static, non-empty Kconfig APN (which is
++ * what this project always configures); it does not support the generic
++ * framework's "APN left empty, wait for the app to call cellular_set_apn()"
++ * path, but enabling use_default_pdp_context already forecloses that path
++ * anyway (modem_cellular_enter_apn_state() skips WAIT_FOR_APN too when set).
++ * Not yet hardware-verified - this is a bigger, riskier change than the
++ * CIMI-settle one: a regression here (APN silently misconfigured) might not
++ * show up every round. */
+ MODEM_CHAT_SCRIPT_CMDS_DEFINE(
+ 	nordic_nrf93m1_init_chat_script_cmds,
+ 	MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", ok_match),
+@@ -30,6 +53,9 @@ MODEM_CHAT_SCRIPT_CMDS_DEFINE(
+ 	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMI", cgmi_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
+ 	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGMR", cgmr_match), MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
+ 	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=4", ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGDCONT=1,\"IP\",\"" CONFIG_MODEM_CELLULAR_APN "\"",
++				   ok_match),
++	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
+ 	MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMUX=0,0,5,127", ok_match));
+ 
+ MODEM_CHAT_SCRIPT_DEFINE(nordic_nrf93m1_init_chat_script, nordic_nrf93m1_init_chat_script_cmds,
+@@ -52,9 +78,10 @@ MODEM_CHAT_SCRIPT_CMDS_DEFINE(nordic_nrf93m1_network_chat_script_cmds,
+  * confirmation that CIMI/%ICCID still succeed every round. Revert to a
+  * shorter nonzero value (try ~100ms before reverting all the way to 500ms)
+  * if they start failing or returning garbled/empty values. */
++/* firefly 2026-10-07: AT+CFUN=1 moved to the init script, before AT+CMUX -
++ * see the comment there. */
+ MODEM_CHAT_SCRIPT_CMDS_DEFINE(nordic_nrf93m1_network_chat_script_cmds,
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CEREG=2", ok_match),
+-			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", ok_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT+CIMI", cimi_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("", ok_match),
+ 			      MODEM_CHAT_SCRIPT_CMD_RESP("AT%ICCID", nrf93m1_iccid_match),

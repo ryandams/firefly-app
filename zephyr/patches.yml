@@ -40,6 +40,62 @@ patches:
       project memory), total round time dropped to 4450/4890/5180/5038ms
       (~4890ms average), down from ~5665ms right after the upstream pin
       advance and ~5795ms from the original pre-advance baseline.
+  - path: zephyr/nrf93m1-early-cgdcont-cfun.patch
+    sha256sum: e306ad631b69d6932613fee7e0cc2b99a8734e09c11cd5a966d28d798b7d8c65
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-10-07
+    upstreamable: false
+    comments: |
+      Applies on top of nrf93m1-trim-cimi-settle.patch (same file). Moves
+      AT+CGDCONT and AT+CFUN=1 from the generic APN script / vendor network
+      script into the plain-AT init script, right after the existing
+      AT+CFUN=4 and before AT+CMUX - a colleague's suggestion, evaluated and
+      implemented per the user's explicit request. The intent: AT+CFUN=1
+      triggers the network attach, so sending it before CMUX lets that
+      attach run in the background during CMUX/DLCI setup (~0.7s of
+      overlap per the colleague's Joulescope-based estimate) instead of
+      serially after it, same idea as this project's own LE270 Change 1
+      (its single biggest win there, ~1.2s/20mC).
+
+      This directly intersects with a real correctness fix Nordic shipped
+      in the same upstream pin advance: AT+CFUN=4 was added before
+      AT+CGDCONT specifically because setting a custom APN without first
+      dropping to flight mode can leave it "not configured properly...
+      network connection may fail" on this chipset (commit
+      "drivers: modem: nrf93m1: Fix setting custom APN") - and this
+      project genuinely uses a custom APN (gsfleet.cxn). Preserved that
+      fix's ordering (CFUN=4 still runs before CGDCONT) rather than
+      bypassing it - only the CFUN=1 that re-enables full functionality
+      moved earlier, alongside CGDCONT itself.
+
+      Requires zephyr,use-default-pdp-ctx=1 in the new
+      boards/nrf93m1dk_nrf54l15_cpuapp.overlay (firefly-app, not this
+      patch) so modem_cellular.c's generic RUN_APN_SCRIPT/WAIT_FOR_APN
+      states are skipped entirely (confirmed by reading
+      modem_cellular_enter_apn_state() directly) - without this, the
+      framework would redundantly resend AT+CGDCONT with the same value
+      after CMUX connects, which this project's own LE270 work
+      (2026-10-05, commit e6c50ca) found can still cost real RF
+      re-signaling time even on a no-op rewrite. The AT+CGDCONT command
+      string is built via compile-time string-literal concatenation with
+      CONFIG_MODEM_CELLULAR_APN, reproducing
+      modem_cellular_build_apn_script()'s own
+      "AT+CGDCONT=1,\"IP\",\"%s\"" format exactly - verified byte-for-byte
+      against the built binary (`strings zephyr.elf | grep CGDCONT`showed
+      the exact expected command). This only supports a static, non-empty
+      Kconfig APN (what this project always configures) and not the
+      generic framework's "empty APN, wait for cellular_set_apn()" path -
+      acceptable since use_default_pdp_context already forecloses that
+      path anyway.
+
+      Bigger and riskier than nrf93m1-trim-cimi-settle.patch: a regression
+      here (APN silently misconfigured) might not show up every round, so
+      this needs more than a couple of hardware rounds to trust. Not yet
+      hardware-verified. All three build targets rebuilt clean
+      (nRF93M1 only one affected; EG800Z/LE270 byte-identical) and all
+      three validation scripts pass.
   - path: zephyr/quectel-eg800z-driver.patch
     sha256sum: f5ebf3cef05b708b54191524ddadac714e80c16a3720f39a49764386fafa08a5
     module: zephyr
