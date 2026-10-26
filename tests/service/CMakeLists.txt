@@ -14,6 +14,7 @@ add_subdirectory(${FIREFLY_ROOT}/code/service service_build)
 target_sources(app PRIVATE
     src/test_srvController.cpp
     src/test_srvNetwork.cpp
+    src/test_srvModemTest.cpp
     ${FIREFLY_ROOT}/code/event_bus.c
 )
 

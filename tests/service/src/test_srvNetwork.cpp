@@ -21,6 +21,7 @@ extern "C"
      * both srvController and srvNetwork can independently observe the same
      * button events, exactly like the real app's main.c. */
     extern const struct zbus_observer test_network_sub;
+    extern const struct zbus_channel unexpected_chan;
 }
 
 namespace
@@ -32,6 +33,7 @@ struct FakeNetwork
     int connect_error{};
     int connect_delay_ms{};
     int send_error{};
+    int disconnect_error{};
     int power_off_error{};
     uint32_t power_on_calls{};
     uint32_t connect_calls{};
@@ -86,7 +88,7 @@ int fake_disconnect(void *ctx)
     auto *fake = static_cast<FakeNetwork *>(ctx);
     fake->disconnect_calls++;
     fake->disconnected = true;
-    return 0;
+    return fake->disconnect_error;
 }
 
 int fake_power_off(void *ctx)
@@ -272,6 +274,80 @@ ZTEST(firefly_network, test_port_validation)
     zassert_equal(srvNetwork_set_port(nullptr), -EINVAL);
     const network_port invalid{&net, nullptr, fake_connect, fake_send, fake_disconnect, fake_power_off};
     zassert_equal(srvNetwork_set_port(&invalid), -EINVAL);
+}
+
+ZTEST(firefly_network, test_disconnect_failure_is_reported_after_a_good_send)
+{
+    net.disconnect_error = -EIO;
+
+    zassert_ok(srvNetwork_start(&test_network_sub));
+    zassert_ok(press_button0_and_wait(500));
+
+    zassert_true(net.sent);
+    zassert_equal(srvNetwork_last_result(), -EIO);
+}
+
+ZTEST(firefly_network, test_connect_failure_takes_precedence_over_disconnect_failure)
+{
+    net.connect_error = -ENETUNREACH;
+    net.disconnect_error = -EIO;
+
+    zassert_ok(srvNetwork_start(&test_network_sub));
+    zassert_ok(press_button0_and_wait(500));
+
+    zassert_equal(srvNetwork_last_result(), -ENETUNREACH);
+}
+
+ZTEST(firefly_network, test_power_off_failure_at_stop_still_stops)
+{
+    net.power_off_error = -EIO;
+
+    zassert_ok(srvNetwork_start(&test_network_sub));
+    zassert_ok(srvNetwork_stop());
+    zassert_equal(net.power_off_calls, 1);
+    zassert_false(srvNetwork_is_running());
+}
+
+ZTEST(firefly_network, test_non_button_and_other_channel_messages_are_ignored)
+{
+    zassert_ok(zbus_chan_add_obs(&unexpected_chan, &test_network_sub, K_MSEC(100)));
+    zassert_ok(srvNetwork_start(&test_network_sub));
+
+    const event_msg event{EVT_RTC_ALARM, 0, 0};
+    zassert_ok(bus_publish_event(&bus_chan, &event));
+    bus_msg press{};
+    press.kind = BUS_MSG_BUTTON;
+    press.data.button = {0, true};
+    zassert_ok(zbus_chan_pub(&unexpected_chan, &press, K_MSEC(100)));
+
+    /* Handled in publish order: the button0 press published last runs the
+     * first round only if both messages above were skipped. */
+    zassert_ok(press_button0_and_wait(500));
+    zassert_equal(srvNetwork_processed_count(), 1);
+    zassert_equal(net.connect_calls, 1);
+
+    zassert_ok(srvNetwork_stop());
+    zassert_ok(zbus_chan_rm_obs(&unexpected_chan, &test_network_sub, K_MSEC(100)));
+}
+
+ZTEST(firefly_network, test_default_port_without_a_modem_fails_the_round_cleanly)
+{
+    /* No fake port: srvNetwork's own built-in port, which is all stubs while
+     * CONFIG_FIREFLY_NETWORK is off. Power on/off and disconnect succeed, so
+     * start/stop work, but there is no modem to connect to. */
+    srvNetwork_reset();
+
+    zassert_ok(srvNetwork_start(&test_network_sub));
+    zassert_ok(press_button0_and_wait(500));
+    zassert_equal(srvNetwork_last_result(), -ENOSYS);
+    zassert_ok(srvNetwork_stop());
+    zassert_false(net.connected);
+}
+
+ZTEST(firefly_network, test_wait_processed_arguments_and_timeout)
+{
+    zassert_equal(srvNetwork_wait_processed(0, -1), -EINVAL);
+    zassert_equal(srvNetwork_wait_processed(srvNetwork_processed_count(), 1), -EAGAIN);
 }
 
 ZTEST_SUITE(firefly_network, NULL, NULL, before, after, NULL);
