@@ -211,6 +211,7 @@ int send_at(RunState &s, const char *command, const char *expected = "OK",
     return matched ? 0 : -ETIMEDOUT;
 }
 
+#ifdef CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
 // Sends AT+CGMR and extracts the version suffix from the module's
 // "mfw_nrf93m1_<version>" response line (confirmed exact format via
 // nordicsemi_search_sources - the nRF93M1 "Updating the modem firmware"
@@ -265,6 +266,7 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
            found ? out : "(no match)", static_cast<double>(k_uptime_get() - tx));
     return found;
 }
+#endif // CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
 
 int wait_for_sim_ready(RunState &s)
 {
