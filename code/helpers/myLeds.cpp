@@ -12,15 +12,9 @@ BUILD_ASSERT(DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios), "firefly requires at least
 // aliases the target board's devicetree actually defines, following the
 // same IF_ENABLED(DT_NODE_EXISTS(...), (...,)) idiom Zephyr's own samples
 // use for optional numbered aliases (see samples/sensor/dht_polling).
-#define LED_ENTRY(idx) IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(led##idx)), \
-                                   (GPIO_DT_SPEC_GET(DT_ALIAS(led##idx), gpios),))
+#define LED_ENTRY(idx) IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(led##idx)), (GPIO_DT_SPEC_GET(DT_ALIAS(led##idx), gpios), ))
 
-struct gpio_dt_spec g_leds[] = {
-    LED_ENTRY(0)
-    LED_ENTRY(1)
-    LED_ENTRY(2)
-    LED_ENTRY(3)
-};
+struct gpio_dt_spec g_leds[] = {LED_ENTRY(0) LED_ENTRY(1) LED_ENTRY(2) LED_ENTRY(3)};
 
 constexpr size_t kLedCount = ARRAY_SIZE(g_leds);
 

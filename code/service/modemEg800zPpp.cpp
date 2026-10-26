@@ -21,7 +21,8 @@ LOG_MODULE_REGISTER(modemEg800z, CONFIG_FIREFLY_LOG_LEVEL);
 
 extern "C" struct modem_ppp *modemEg800zPpp_ppp(void);
 
-namespace {
+namespace
+{
 
 // The modem node and its parent UART, exactly as srvModemTest_eg800z.cpp
 // resolves them - with MODEM_CELLULAR off, nothing binds a driver to the
@@ -87,10 +88,17 @@ void capture_response(struct modem_chat *, char **argv, uint16_t argc, void *)
     // "+CSQ: 20,99" style answers without a parser per command.
     g_last_response_len = 0;
     g_last_response[0] = '\0';
-    for (uint16_t i = 1; i < argc; ++i) {
+    for (uint16_t i = 1; i < argc; ++i)
+    {
         const size_t part = strlen(argv[i]);
-        if (g_last_response_len + part + 2 >= kResponseMax) { break; }
-        if (g_last_response_len != 0) { g_last_response[g_last_response_len++] = ','; }
+        if (g_last_response_len + part + 2 >= kResponseMax)
+        {
+            break;
+        }
+        if (g_last_response_len != 0)
+        {
+            g_last_response[g_last_response_len++] = ',';
+        }
         memcpy(&g_last_response[g_last_response_len], argv[i], part);
         g_last_response_len += part;
         g_last_response[g_last_response_len] = '\0';
@@ -107,15 +115,17 @@ atomic_t g_registered_ps;
 bool stat_is_registered(const char *value)
 {
     // <stat> 1 = registered home, 5 = registered roaming.
-    return value != nullptr && value[0] != '\0' && value[1] == '\0' &&
-           (value[0] == '1' || value[0] == '5');
+    return value != nullptr && value[0] != '\0' && value[1] == '\0' && (value[0] == '1' || value[0] == '5');
 }
 
 void on_cxreg(struct modem_chat *, char **argv, uint16_t argc, void *user_data)
 {
     // "+CREG: <n>,<stat>" for the read command, "+CREG: <stat>" for the URC -
     // take the last field either way, which is <stat> in both forms.
-    if (argc < 2) { return; }
+    if (argc < 2)
+    {
+        return;
+    }
     const bool registered = stat_is_registered(argv[argc - 1]);
     atomic_set(static_cast<atomic_t *>(user_data), registered ? 1 : 0);
 }
@@ -139,12 +149,9 @@ void on_no_carrier(struct modem_chat *, char **, uint16_t, void *)
     LOG_INF("NO CARRIER - module left data mode");
 }
 
-MODEM_CHAT_MATCHES_DEFINE(g_unsol,
-                          MODEM_CHAT_MATCH("+CREG: ", ",", on_creg),
-                          MODEM_CHAT_MATCH("+CGREG: ", ",", on_cgreg),
-                          MODEM_CHAT_MATCH("+CEREG: ", ",", on_cgreg),
-                          MODEM_CHAT_MATCH("NO CARRIER", "", on_no_carrier),
-                          MODEM_CHAT_MATCH("RDY", "", NULL),
+MODEM_CHAT_MATCHES_DEFINE(g_unsol, MODEM_CHAT_MATCH("+CREG: ", ",", on_creg),
+                          MODEM_CHAT_MATCH("+CGREG: ", ",", on_cgreg), MODEM_CHAT_MATCH("+CEREG: ", ",", on_cgreg),
+                          MODEM_CHAT_MATCH("NO CARRIER", "", on_no_carrier), MODEM_CHAT_MATCH("RDY", "", NULL),
                           MODEM_CHAT_MATCH("POWERED DOWN", "", NULL));
 
 struct modem_chat g_chat;
@@ -170,16 +177,14 @@ MODEM_CHAT_MATCH_DEFINE(kConnect, "CONNECT", "", NULL);
 MODEM_CHAT_MATCH_DEFINE(kCpinReady, "+CPIN: READY", "", NULL);
 MODEM_CHAT_MATCH_DEFINE(kAny, "", "", capture_response);
 MODEM_CHAT_MATCHES_DEFINE(kAbort, MODEM_CHAT_MATCH("ERROR", "", NULL));
-MODEM_CHAT_MATCHES_DEFINE(kDialAbort,
-                          MODEM_CHAT_MATCH("ERROR", "", NULL),
-                          MODEM_CHAT_MATCH("BUSY", "", NULL),
-                          MODEM_CHAT_MATCH("NO ANSWER", "", NULL),
-                          MODEM_CHAT_MATCH("NO CARRIER", "", NULL),
+MODEM_CHAT_MATCHES_DEFINE(kDialAbort, MODEM_CHAT_MATCH("ERROR", "", NULL), MODEM_CHAT_MATCH("BUSY", "", NULL),
+                          MODEM_CHAT_MATCH("NO ANSWER", "", NULL), MODEM_CHAT_MATCH("NO CARRIER", "", NULL),
                           MODEM_CHAT_MATCH("NO DIALTONE", "", NULL));
 
 } // namespace
 
-namespace {
+namespace
+{
 
 // ---------------------------------------------------------------------------
 //  Chat scripts - PPP note section 3.2's recommended procedure, in order
@@ -197,9 +202,7 @@ MODEM_CHAT_SCRIPT_DEFINE(kSyncScript, kSyncCmds, kAbort, NULL, 1);
 // sides by the board overlay's current-speed, so the only thing a &W would
 // add is an NVM write on every link_up().
 MODEM_CHAT_SCRIPT_CMDS_DEFINE(
-    kInitCmds,
-    MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", kOk),
-    MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMEE=1", kOk),
+    kInitCmds, MODEM_CHAT_SCRIPT_CMD_RESP("ATE0", kOk), MODEM_CHAT_SCRIPT_CMD_RESP("AT+CMEE=1", kOk),
     // AT manual, "AT+IFC Set UART Flow Control": 2,2 = RTS/CTS both ways,
     // matching hw-flow-control on this UART node.
     MODEM_CHAT_SCRIPT_CMD_RESP("AT+IFC=2,2", kOk),
@@ -213,14 +216,11 @@ MODEM_CHAT_SCRIPT_CMDS_DEFINE(
     // Pin the RI URC pulse rather than inheriting it. AT manual sections
     // 4.4.6/4.4.7: <typeRI>,<pulse_duration>,<pulse_count>.
     MODEM_CHAT_SCRIPT_CMD_RESP(
-        "AT+QCFG=\"urc/ri/other\",\"pulse\","
-        STRINGIFY(CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS) ",1", kOk),
+        "AT+QCFG=\"urc/ri/other\",\"pulse\"," STRINGIFY(CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS) ",1", kOk),
     MODEM_CHAT_SCRIPT_CMD_RESP(
-        "AT+QCFG=\"urc/ri/smsincoming\",\"pulse\","
-        STRINGIFY(CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS) ",1", kOk),
+        "AT+QCFG=\"urc/ri/smsincoming\",\"pulse\"," STRINGIFY(CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS) ",1", kOk),
     // Registration URCs on, so on_creg/on_cgreg see changes without polling.
-    MODEM_CHAT_SCRIPT_CMD_RESP("AT+CREG=1", kOk),
-    MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGREG=1", kOk),
+    MODEM_CHAT_SCRIPT_CMD_RESP("AT+CREG=1", kOk), MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGREG=1", kOk),
     // Full function mode - RF must be on to register. The module was already
     // at CFUN=1 in every observed run; setting it again returns OK.
     MODEM_CHAT_SCRIPT_CMD_RESP("AT+CFUN=1", kOk));
@@ -243,11 +243,10 @@ MODEM_CHAT_SCRIPT_DEFINE(kRegScript, kRegCmds, kAbort, NULL, 5);
 // Note section 3.1: set the APN with AT+CGDCONT, then ATD*99#. The short
 // unmatched "AT" is the same guard cellular_quectel_eg800z.c uses - dialling
 // immediately after CGDCONT draws NO CARRIER on some units.
-MODEM_CHAT_SCRIPT_CMDS_DEFINE(
-    kDialCmds,
-    MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGDCONT=1,\"IP\",\"" CONFIG_FIREFLY_NETWORK_APN "\"", kOk),
-    MODEM_CHAT_SCRIPT_CMD_RESP_NONE("AT", 500),
-    MODEM_CHAT_SCRIPT_CMD_RESP("ATD*99#", kConnect));
+MODEM_CHAT_SCRIPT_CMDS_DEFINE(kDialCmds,
+                              MODEM_CHAT_SCRIPT_CMD_RESP("AT+CGDCONT=1,\"IP\",\"" CONFIG_FIREFLY_NETWORK_APN "\"", kOk),
+                              MODEM_CHAT_SCRIPT_CMD_RESP_NONE("AT", 500),
+                              MODEM_CHAT_SCRIPT_CMD_RESP("ATD*99#", kConnect));
 MODEM_CHAT_SCRIPT_DEFINE(kDialScript, kDialCmds, kDialAbort, NULL, 30);
 
 // ATO returns to data mode and answers CONNECT (note section 4.1.2.1).
@@ -272,8 +271,12 @@ int run_script(const struct modem_chat_script *script)
 int sync_uart(int32_t timeout_ms)
 {
     const int64_t deadline = k_uptime_get() + timeout_ms;
-    do {
-        if (run_script(&kSyncScript) == 0) { return 0; }
+    do
+    {
+        if (run_script(&kSyncScript) == 0)
+        {
+            return 0;
+        }
         k_sleep(K_MSEC(100));
     } while (k_uptime_get() < deadline);
     LOG_ERR("no AT/OK from module within %d ms", timeout_ms);
@@ -282,10 +285,11 @@ int sync_uart(int32_t timeout_ms)
 
 int wait_for_sim(void)
 {
-    const int64_t deadline =
-        k_uptime_get() + CONFIG_FIREFLY_NETWORK_EG800Z_SIM_TIMEOUT_S * MSEC_PER_SEC;
-    do {
-        if (run_script(&kSimScript) == 0) {
+    const int64_t deadline = k_uptime_get() + CONFIG_FIREFLY_NETWORK_EG800Z_SIM_TIMEOUT_S * MSEC_PER_SEC;
+    do
+    {
+        if (run_script(&kSimScript) == 0)
+        {
             LOG_INF("SIM ready");
             return 0;
         }
@@ -301,22 +305,23 @@ int wait_for_sim(void)
 // timeout is an error and a PS timeout is only a warning.
 int wait_for_registration(void)
 {
-    const int64_t deadline =
-        k_uptime_get() + CONFIG_FIREFLY_NETWORK_EG800Z_REG_TIMEOUT_S * MSEC_PER_SEC;
+    const int64_t deadline = k_uptime_get() + CONFIG_FIREFLY_NETWORK_EG800Z_REG_TIMEOUT_S * MSEC_PER_SEC;
     atomic_set(&g_registered_cs, 0);
     atomic_set(&g_registered_ps, 0);
-    do {
+    do
+    {
         (void)run_script(&kRegScript);
-        if (atomic_get(&g_registered_cs) == 1 && atomic_get(&g_registered_ps) == 1) {
+        if (atomic_get(&g_registered_cs) == 1 && atomic_get(&g_registered_ps) == 1)
+        {
             LOG_INF("registered (CS and PS)");
             return 0;
         }
         k_sleep(K_SECONDS(1));
     } while (k_uptime_get() < deadline);
 
-    if (atomic_get(&g_registered_cs) != 1) {
-        LOG_ERR("no network registration within %d s",
-                CONFIG_FIREFLY_NETWORK_EG800Z_REG_TIMEOUT_S);
+    if (atomic_get(&g_registered_cs) != 1)
+    {
+        LOG_ERR("no network registration within %d s", CONFIG_FIREFLY_NETWORK_EG800Z_REG_TIMEOUT_S);
         return -ENETUNREACH;
     }
     LOG_WRN("PS domain not registered within %d s - dialling anyway, as the PPP "
@@ -327,7 +332,8 @@ int wait_for_registration(void)
 
 } // namespace
 
-namespace {
+namespace
+{
 
 // ---------------------------------------------------------------------------
 //  Data mode <-> command mode  (PPP note section 4.1)
@@ -350,7 +356,8 @@ int enter_command_mode_dtr(void)
 {
     modem_ppp_release(modemEg800zPpp_ppp());
     int err = modem_chat_attach(&g_chat, g_pipe);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("chat attach failed (%d)", err);
         return err;
     }
@@ -361,7 +368,8 @@ int enter_command_mode_dtr(void)
     // AT/OK exchange. A module still in data mode would treat "AT" as PPP
     // payload and never answer, so this is a real check, not a formality.
     err = sync_uart(2000);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("DTR edge did not reach command mode (%d)", err);
         dtr_set_data_mode(true);
         modem_chat_release(&g_chat);
@@ -385,24 +393,27 @@ int enter_command_mode_escape(void)
 {
     modem_ppp_release(modemEg800zPpp_ppp());
     int err = modem_chat_attach(&g_chat, g_pipe);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("chat attach failed (%d)", err);
         return err;
     }
 
     static const uint8_t kEscape[] = {'+', '+', '+'};
-    k_sleep(K_MSEC(1100));  // guard: no traffic for >1 s before
+    k_sleep(K_MSEC(1100)); // guard: no traffic for >1 s before
     const int sent = modem_pipe_transmit(g_pipe, kEscape, sizeof(kEscape));
-    if (sent != (int)sizeof(kEscape)) {
+    if (sent != (int)sizeof(kEscape))
+    {
         LOG_ERR("failed to transmit escape sequence (%d)", sent);
         modem_chat_release(&g_chat);
         (void)modem_ppp_attach(modemEg800zPpp_ppp(), g_pipe);
         return (sent < 0) ? sent : -EIO;
     }
-    k_sleep(K_MSEC(1100));  // guard: no traffic for >1 s after
+    k_sleep(K_MSEC(1100)); // guard: no traffic for >1 s after
 
     err = sync_uart(2000);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("escape sequence did not reach command mode (%d)", err);
         modem_chat_release(&g_chat);
         (void)modem_ppp_attach(modemEg800zPpp_ppp(), g_pipe);
@@ -421,11 +432,13 @@ int exit_command_mode(void)
     modem_chat_release(&g_chat);
 
     const int attach_err = modem_ppp_attach(modemEg800zPpp_ppp(), g_pipe);
-    if (attach_err != 0) {
+    if (attach_err != 0)
+    {
         LOG_ERR("modem_ppp_attach failed (%d)", attach_err);
         return attach_err;
     }
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("ATO did not return CONNECT (%d) - PPP may be dead", err);
         atomic_set(&g_in_data_mode, 0);
     }
@@ -455,13 +468,14 @@ void ri_work_handler(struct k_work *)
     // pulse from AT+QCFG="urc/ri/ring"'s "auto" behaviour, which holds RI
     // down for the whole duration of an incoming call.
     k_sleep(K_MSEC(CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS + 40));
-    if (gpio_pin_get_dt(&kRing) != 0) {
-        LOG_DBG("RI still asserted after %d ms - not a URC pulse, ignoring",
-                CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS);
+    if (gpio_pin_get_dt(&kRing) != 0)
+    {
+        LOG_DBG("RI still asserted after %d ms - not a URC pulse, ignoring", CONFIG_FIREFLY_NETWORK_EG800Z_RI_PULSE_MS);
         return;
     }
 
-    if (atomic_get(&g_in_data_mode) != 1) {
+    if (atomic_get(&g_in_data_mode) != 1)
+    {
         // In command mode the URC is delivered to the port directly and the
         // unsolicited matches have already seen it. Nothing to do.
         LOG_DBG("RI pulse while in command mode - URC already reported");
@@ -469,14 +483,18 @@ void ri_work_handler(struct k_work *)
     }
 
     LOG_INF("RI pulse - switching to command mode to drain URC");
-    if (enter_command_mode_dtr() != 0) { return; }
+    if (enter_command_mode_dtr() != 0)
+    {
+        return;
+    }
 
     // Give the module a moment to re-report the pending URC now that the
     // port can carry it. Anything it sends is matched by g_unsol, so the
     // registration/NO CARRIER callbacks above run here as a side effect.
     k_sleep(K_MSEC(500));
 
-    if (exit_command_mode() == 0) {
+    if (exit_command_mode() == 0)
+    {
         atomic_inc(&g_urc_count);
         LOG_INF("URC drained, back in data mode");
     }
@@ -493,29 +511,41 @@ void ri_gpio_callback(const struct device *, struct gpio_callback *, uint32_t)
 int ri_init(void)
 {
     static bool initialised;
-    if (initialised) { return 0; }
+    if (initialised)
+    {
+        return 0;
+    }
 
-    if (!gpio_is_ready_dt(&kRing)) {
+    if (!gpio_is_ready_dt(&kRing))
+    {
         LOG_ERR("RI GPIO not ready");
         return -ENODEV;
     }
     int err = gpio_pin_configure_dt(&kRing, GPIO_INPUT);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     k_work_queue_init(&g_ri_workq);
-    k_work_queue_start(&g_ri_workq, g_ri_stack, K_THREAD_STACK_SIZEOF(g_ri_stack),
-                       K_PRIO_PREEMPT(10), NULL);
+    k_work_queue_start(&g_ri_workq, g_ri_stack, K_THREAD_STACK_SIZEOF(g_ri_stack), K_PRIO_PREEMPT(10), NULL);
     k_thread_name_set(k_work_queue_thread_get(&g_ri_workq), "eg800z_ri");
     k_work_init(&g_ri_work, ri_work_handler);
 
     gpio_init_callback(&g_ri_cb, ri_gpio_callback, BIT(kRing.pin));
     err = gpio_add_callback(kRing.port, &g_ri_cb);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     // Edge to active: with mdm-ring-gpios declared GPIO_ACTIVE_LOW this is
     // the high->low transition the note describes.
     err = gpio_pin_interrupt_configure_dt(&kRing, GPIO_INT_EDGE_TO_ACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     initialised = true;
     return 0;
@@ -539,11 +569,13 @@ int ri_init(void)
 // ---------------------------------------------------------------------------
 int modemEg800zPpp_link_up(void)
 {
-    if (!device_is_ready(kUart)) {
+    if (!device_is_ready(kUart))
+    {
         LOG_ERR("modem UART not ready");
         return -ENODEV;
     }
-    if (!gpio_is_ready_dt(&kDtr) || !gpio_is_ready_dt(&kPower) || !gpio_is_ready_dt(&kReset)) {
+    if (!gpio_is_ready_dt(&kDtr) || !gpio_is_ready_dt(&kPower) || !gpio_is_ready_dt(&kReset))
+    {
         LOG_ERR("modem control GPIOs not ready");
         return -ENODEV;
     }
@@ -552,19 +584,32 @@ int modemEg800zPpp_link_up(void)
     // but they must be actively held inactive rather than floating - see the
     // kPower/kReset declaration comment.
     int err = gpio_pin_configure_dt(&kPower, GPIO_OUTPUT_INACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     err = gpio_pin_configure_dt(&kReset, GPIO_OUTPUT_INACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     // DTR asserted from the outset: the module must be awake and in the
     // "stay in data mode" state before any AT traffic.
     err = gpio_pin_configure_dt(&kDtr, GPIO_OUTPUT_ACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     err = ri_init();
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
-    if (!g_pipe_open) {
+    if (!g_pipe_open)
+    {
         const struct modem_backend_uart_config backend_config = {
             .uart = kUart,
             // Not backend-owned: this file drives DTR for mode switching.
@@ -575,17 +620,20 @@ int modemEg800zPpp_link_up(void)
             .transmit_buf_size = sizeof(g_uart_tx_buf),
         };
         g_pipe = modem_backend_uart_init(&g_uart_backend, &backend_config);
-        if (g_pipe == nullptr) {
+        if (g_pipe == nullptr)
+        {
             LOG_ERR("modem_backend_uart_init failed");
             return -EIO;
         }
         err = modem_chat_init(&g_chat, &kChatConfig);
-        if (err != 0) {
+        if (err != 0)
+        {
             LOG_ERR("modem_chat_init failed (%d)", err);
             return err;
         }
         err = modem_pipe_open(g_pipe, K_SECONDS(5));
-        if (err != 0) {
+        if (err != 0)
+        {
             LOG_ERR("modem_pipe_open failed (%d)", err);
             return err;
         }
@@ -593,7 +641,8 @@ int modemEg800zPpp_link_up(void)
     }
 
     err = modem_chat_attach(&g_chat, g_pipe);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("modem_chat_attach failed (%d)", err);
         return err;
     }
@@ -602,22 +651,33 @@ int modemEg800zPpp_link_up(void)
     // self-starts with the board, and a >=650 ms pulse on a running module is
     // the documented power-OFF action.
     err = sync_uart(10000);
-    if (err != 0) { goto detach; }
+    if (err != 0)
+    {
+        goto detach;
+    }
 
     err = run_script(&kInitScript);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("init script failed (%d)", err);
         goto detach;
     }
 
     err = wait_for_sim();
-    if (err != 0) { goto detach; }
+    if (err != 0)
+    {
+        goto detach;
+    }
 
     err = wait_for_registration();
-    if (err != 0) { goto detach; }
+    if (err != 0)
+    {
+        goto detach;
+    }
 
     err = run_script(&kDialScript);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("ATD*99# did not return CONNECT (%d)", err);
         goto detach;
     }
@@ -626,7 +686,8 @@ int modemEg800zPpp_link_up(void)
     // frame, so modem_chat must let go before modem_ppp takes over.
     modem_chat_release(&g_chat);
     err = modem_ppp_attach(modemEg800zPpp_ppp(), g_pipe);
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("modem_ppp_attach failed (%d)", err);
         return err;
     }
@@ -646,19 +707,25 @@ int modemEg800zPpp_link_down(void)
     // send the LCP Terminate-Request that note section 5 recommends. The
     // module answers NO CARRIER and returns to command mode by itself; the
     // on_no_carrier() unsolicited match clears g_in_data_mode when it does.
-    if (!g_pipe_open) { return 0; }
+    if (!g_pipe_open)
+    {
+        return 0;
+    }
 
     modem_ppp_release(modemEg800zPpp_ppp());
 
     int err = modem_chat_attach(&g_chat, g_pipe);
-    if (err == 0) {
+    if (err == 0)
+    {
         // Note section 5 gives the MCU 3 s to see the Terminate-Ack. If the
         // module has not dropped the carrier by then, force the issue with
         // the DTR edge rather than leaving it in data mode.
-        for (int i = 0; i < 6 && atomic_get(&g_in_data_mode) == 1; ++i) {
+        for (int i = 0; i < 6 && atomic_get(&g_in_data_mode) == 1; ++i)
+        {
             k_sleep(K_MSEC(500));
         }
-        if (atomic_get(&g_in_data_mode) == 1) {
+        if (atomic_get(&g_in_data_mode) == 1)
+        {
             LOG_WRN("no NO CARRIER after 3 s - forcing command mode via DTR");
             dtr_set_data_mode(false);
             k_sleep(K_MSEC(100));
@@ -673,25 +740,38 @@ int modemEg800zPpp_link_down(void)
     // that same pulse width is the power-OFF action - see the autostarts
     // comment in the board overlay.
     err = modem_pipe_close(g_pipe, K_SECONDS(5));
-    if (err != 0) { LOG_WRN("modem_pipe_close failed (%d)", err); }
+    if (err != 0)
+    {
+        LOG_WRN("modem_pipe_close failed (%d)", err);
+    }
     g_pipe_open = false;
     return 0;
 }
 
 int modemEg800zPpp_at(const char *command, char *response, size_t response_size)
 {
-    if (command == nullptr) { return -EINVAL; }
-    if (atomic_get(&g_in_data_mode) != 1) {
+    if (command == nullptr)
+    {
+        return -EINVAL;
+    }
+    if (atomic_get(&g_in_data_mode) != 1)
+    {
         // Refused rather than attempted: note section 4.1.1.2 warns the
         // escape sequence tears down an in-progress negotiation, so running
         // it before the link is up would break the very thing it is for.
         LOG_WRN("modemEg800zPpp_at() needs an established PPP link");
         return -EAGAIN;
     }
-    if (strlen(command) >= sizeof(g_at_request)) { return -E2BIG; }
+    if (strlen(command) >= sizeof(g_at_request))
+    {
+        return -E2BIG;
+    }
 
     int err = enter_command_mode_escape();
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     strncpy(g_at_request, command, sizeof(g_at_request) - 1);
     g_at_request[sizeof(g_at_request) - 1] = '\0';
@@ -709,7 +789,8 @@ int modemEg800zPpp_at(const char *command, char *response, size_t response_size)
     modem_chat_script_set_timeout(&g_at_script, 5);
 
     err = run_script(&g_at_script);
-    if (err == 0 && response != nullptr && response_size > 0) {
+    if (err == 0 && response != nullptr && response_size > 0)
+    {
         strncpy(response, g_last_response, response_size - 1);
         response[response_size - 1] = '\0';
     }
@@ -727,9 +808,21 @@ unsigned int modemEg800zPpp_urc_count(void)
 
 #include <errno.h>
 
-int modemEg800zPpp_link_up(void) { return -ENOSYS; }
-int modemEg800zPpp_link_down(void) { return 0; }
-int modemEg800zPpp_at(const char *, char *, size_t) { return -ENOSYS; }
-unsigned int modemEg800zPpp_urc_count(void) { return 0; }
+int modemEg800zPpp_link_up(void)
+{
+    return -ENOSYS;
+}
+int modemEg800zPpp_link_down(void)
+{
+    return 0;
+}
+int modemEg800zPpp_at(const char *, char *, size_t)
+{
+    return -ENOSYS;
+}
+unsigned int modemEg800zPpp_urc_count(void)
+{
+    return 0;
+}
 
 #endif

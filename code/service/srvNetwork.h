@@ -37,7 +37,8 @@
 
 struct zbus_observer;
 
-struct network_port {
+struct network_port
+{
     void *context;
     int (*power_on)(void *context);
     int (*connect)(void *context);
@@ -47,26 +48,27 @@ struct network_port {
 };
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* subscriber must already be one of bus_chan's observers (see event_bus.h)
- * - srvNetwork listens on it for button0-press events and runs one round
- * per press. */
-int srvNetwork_start(const struct zbus_observer *subscriber);
-int srvNetwork_stop(void);
-bool srvNetwork_is_running(void);
+    /* subscriber must already be one of bus_chan's observers (see event_bus.h)
+     * - srvNetwork listens on it for button0-press events and runs one round
+     * per press. */
+    int srvNetwork_start(const struct zbus_observer *subscriber);
+    int srvNetwork_stop(void);
+    bool srvNetwork_is_running(void);
 
-/* Result of the most recently completed round: 0 on success, otherwise
- * whichever of connect()/send()/disconnect() failed first. -ENODATA if no
- * round has completed yet. */
-int srvNetwork_last_result(void);
-uint32_t srvNetwork_processed_count(void);
-int srvNetwork_wait_processed(uint32_t previous_count, int32_t timeout_ms);
+    /* Result of the most recently completed round: 0 on success, otherwise
+     * whichever of connect()/send()/disconnect() failed first. -ENODATA if no
+     * round has completed yet. */
+    int srvNetwork_last_result(void);
+    uint32_t srvNetwork_processed_count(void);
+    int srvNetwork_wait_processed(uint32_t previous_count, int32_t timeout_ms);
 
 #ifdef CONFIG_FIREFLY_TEST_HOOKS
-int srvNetwork_set_port(const struct network_port *port);
-void srvNetwork_reset(void);
+    int srvNetwork_set_port(const struct network_port *port);
+    void srvNetwork_reset(void);
 #endif
 
 #ifdef __cplusplus

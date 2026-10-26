@@ -21,7 +21,8 @@
 
 LOG_MODULE_REGISTER(srvModemTest, CONFIG_FIREFLY_LOG_LEVEL);
 
-namespace {
+namespace
+{
 
 #ifdef CONFIG_FIREFLY_MODEM_TEST_NRF93M1
 
@@ -53,14 +54,22 @@ constexpr size_t kRxSize = 2048;
 constexpr size_t kUartRxBufferSize = 256;
 constexpr size_t kUartRxBufferCount = 4;
 constexpr size_t kMarkCount = 11;
-enum Mark : size_t {
-    MODEM_READY, RF_ON, REGISTERED, ATTACHED, SOCK_READY, SENT, REPLIED, RX_DONE, DETACHED, DEREG,
+enum Mark : size_t
+{
+    MODEM_READY,
+    RF_ON,
+    REGISTERED,
+    ATTACHED,
+    SOCK_READY,
+    SENT,
+    REPLIED,
+    RX_DONE,
+    DETACHED,
+    DEREG,
     POWERED_DOWN
 };
-const char *const kMarkNames[kMarkCount] = {
-    "modem_ready", "rf_on", "registered", "attached", "sock_ready", "sent", "replied", "rx_done",
-    "detached", "dereg", "powered_down"
-};
+const char *const kMarkNames[kMarkCount] = {"modem_ready", "rf_on",   "registered", "attached", "sock_ready",  "sent",
+                                            "replied",     "rx_done", "detached",   "dereg",    "powered_down"};
 
 // This service's own belief about modem power state - mdm-power-gpios is a
 // momentary power-key pulse, not a level-controlled enable line, so there
@@ -78,7 +87,8 @@ bool g_modem_powered = false;
 // than blocking a shell thread for that long.
 K_MUTEX_DEFINE(g_modem_lock);
 
-struct RunState {
+struct RunState
+{
     int64_t t0;
     int64_t mark[kMarkCount];
     bool valid[kMarkCount];
@@ -94,12 +104,13 @@ size_t g_next_uart_rx_buffer = 1;
 
 void uart_event_handler(const struct device *dev, struct uart_event *event, void *)
 {
-    switch (event->type) {
+    switch (event->type)
+    {
     case UART_RX_RDY:
-        ring_buf_put(&g_uart_rx_ring, event->data.rx.buf + event->data.rx.offset,
-                     event->data.rx.len);
+        ring_buf_put(&g_uart_rx_ring, event->data.rx.buf + event->data.rx.offset, event->data.rx.len);
         break;
-    case UART_RX_BUF_REQUEST: {
+    case UART_RX_BUF_REQUEST:
+    {
         uint8_t *next = g_uart_rx_buffers[g_next_uart_rx_buffer];
         g_next_uart_rx_buffer = (g_next_uart_rx_buffer + 1) % kUartRxBufferCount;
         (void)uart_rx_buf_rsp(dev, next, kUartRxBufferSize);
@@ -110,7 +121,10 @@ void uart_event_handler(const struct device *dev, struct uart_event *event, void
     }
 }
 
-double seconds(int64_t ms) { return static_cast<double>(ms) / 1000.0; }
+double seconds(int64_t ms)
+{
+    return static_cast<double>(ms) / 1000.0;
+}
 
 void set_mark(RunState &s, Mark mark)
 {
@@ -120,33 +134,46 @@ void set_mark(RunState &s, Mark mark)
 
 void uart_write(const uint8_t *data, size_t len)
 {
-    for (size_t i = 0; i < len; ++i) { uart_poll_out(kUart, data[i]); }
+    for (size_t i = 0; i < len; ++i)
+    {
+        uart_poll_out(kUart, data[i]);
+    }
 }
 
-void uart_write(const char *text) { uart_write(reinterpret_cast<const uint8_t *>(text), strlen(text)); }
+void uart_write(const char *text)
+{
+    uart_write(reinterpret_cast<const uint8_t *>(text), strlen(text));
+}
 
 void flush_rx()
 {
     ring_buf_reset(&g_uart_rx_ring);
 }
 
-bool contains(const char *haystack, const char *needle) { return strstr(haystack, needle) != nullptr; }
+bool contains(const char *haystack, const char *needle)
+{
+    return strstr(haystack, needle) != nullptr;
+}
 
 bool registered_urc(const char *text)
 {
     const char *p = text;
-    while ((p = strstr(p, "+CEREG:")) != nullptr) {
+    while ((p = strstr(p, "+CEREG:")) != nullptr)
+    {
         p += strlen("+CEREG:");
-        while (*p == ' ' || *p == '\t') { ++p; }
-        if ((*p == '1' || *p == '5') && (p[1] == '\r' || p[1] == '\n' || p[1] == ',')) {
+        while (*p == ' ' || *p == '\t')
+        {
+            ++p;
+        }
+        if ((*p == '1' || *p == '5') && (p[1] == '\r' || p[1] == '\n' || p[1] == ','))
+        {
             return true;
         }
     }
     return false;
 }
 
-bool read_until(RunState &s, const char *expected, int32_t timeout_ms,
-                bool cereg_pattern = false)
+bool read_until(RunState &s, const char *expected, int32_t timeout_ms, bool cereg_pattern = false)
 {
     char buffer[kRxSize]{};
     char line[256]{};
@@ -156,36 +183,52 @@ bool read_until(RunState &s, const char *expected, int32_t timeout_ms,
     const int64_t start = k_uptime_get();
     const int64_t deadline = start + timeout_ms;
 
-    while (k_uptime_get() < deadline) {
+    while (k_uptime_get() < deadline)
+    {
         uint8_t byte;
-        if (ring_buf_get(&g_uart_rx_ring, &byte, 1) != 1) {
+        if (ring_buf_get(&g_uart_rx_ring, &byte, 1) != 1)
+        {
             k_sleep(K_MSEC(kPollMs));
             continue;
         }
-        if (first < 0 && byte != '\r' && byte != '\n') { first = k_uptime_get(); }
-        if (used + 1 < sizeof(buffer)) {
+        if (first < 0 && byte != '\r' && byte != '\n')
+        {
+            first = k_uptime_get();
+        }
+        if (used + 1 < sizeof(buffer))
+        {
             buffer[used++] = static_cast<char>(byte);
             buffer[used] = '\0';
         }
-        if (byte == '\r' || byte == '\n') {
-            if (line_used != 0) {
+        if (byte == '\r' || byte == '\n')
+        {
+            if (line_used != 0)
+            {
                 line[line_used] = '\0';
                 printk("    RX [%8.4f] %s\n", seconds(k_uptime_get() - s.t0), line);
                 line_used = 0;
             }
-        } else {
-            if (line_used + 1 < sizeof(line)) { line[line_used++] = static_cast<char>(byte); }
+        }
+        else
+        {
+            if (line_used + 1 < sizeof(line))
+            {
+                line[line_used++] = static_cast<char>(byte);
+            }
         }
         if ((cereg_pattern && registered_urc(buffer)) ||
-            (!cereg_pattern && expected != nullptr && contains(buffer, expected))) {
-            if (line_used != 0) {
+            (!cereg_pattern && expected != nullptr && contains(buffer, expected)))
+        {
+            if (line_used != 0)
+            {
                 line[line_used] = '\0';
                 printk("    RX [%8.4f] %s\n", seconds(k_uptime_get() - s.t0), line);
             }
             return true;
         }
     }
-    if (line_used != 0) {
+    if (line_used != 0)
+    {
         line[line_used] = '\0';
         printk("    RX [%8.4f] %s\n", seconds(k_uptime_get() - s.t0), line);
     }
@@ -193,8 +236,8 @@ bool read_until(RunState &s, const char *expected, int32_t timeout_ms,
     return false;
 }
 
-int send_at(RunState &s, const char *command, const char *expected = "OK",
-            int32_t timeout_ms = 10000, bool required = true)
+int send_at(RunState &s, const char *command, const char *expected = "OK", int32_t timeout_ms = 10000,
+            bool required = true)
 {
     const int64_t tx = k_uptime_get();
     printk("  TX [%8.4f] %s\n", seconds(tx - s.t0), command);
@@ -202,9 +245,9 @@ int send_at(RunState &s, const char *command, const char *expected = "OK",
     uart_write("\r");
     const bool matched = read_until(s, expected, timeout_ms);
     const int64_t end = k_uptime_get();
-    printk("     -> %s | complete %7.1f ms\n", matched ? "match" : "MISS ",
-           static_cast<double>(end - tx));
-    if (required && !matched) {
+    printk("     -> %s | complete %7.1f ms\n", matched ? "match" : "MISS ", static_cast<double>(end - tx));
+    if (required && !matched)
+    {
         printk("Expected '%s' not received.\n", expected);
         return -ETIMEDOUT;
     }
@@ -231,13 +274,16 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
     uart_write("AT+CGMR");
     uart_write("\r");
     const int64_t deadline = k_uptime_get() + timeout_ms;
-    while (k_uptime_get() < deadline) {
+    while (k_uptime_get() < deadline)
+    {
         uint8_t byte;
-        if (ring_buf_get(&g_uart_rx_ring, &byte, 1) != 1) {
+        if (ring_buf_get(&g_uart_rx_ring, &byte, 1) != 1)
+        {
             k_sleep(K_MSEC(kPollMs));
             continue;
         }
-        if (used + 1 < sizeof(buffer)) {
+        if (used + 1 < sizeof(buffer))
+        {
             buffer[used++] = static_cast<char>(byte);
             buffer[used] = '\0';
         }
@@ -247,15 +293,20 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
         // not arrived in the buffer yet at that exact moment, which is
         // exactly what made the first version of this function always
         // capture an empty string (confirmed on real hardware).
-        if (contains(buffer, "OK")) { break; }
+        if (contains(buffer, "OK"))
+        {
+            break;
+        }
     }
     out[0] = '\0';
     bool found = false;
     const char *p = strstr(buffer, kPrefix);
-    if (p != nullptr) {
+    if (p != nullptr)
+    {
         p += strlen(kPrefix);
         size_t i = 0;
-        while (p[i] != '\0' && p[i] != '\r' && p[i] != '\n' && i + 1 < out_size) {
+        while (p[i] != '\0' && p[i] != '\r' && p[i] != '\n' && i + 1 < out_size)
+        {
             out[i] = p[i];
             ++i;
         }
@@ -272,9 +323,13 @@ int wait_for_sim_ready(RunState &s)
 {
     constexpr int kAttempts = 20;
     printk("\n=== Waiting for SIM ===\n");
-    for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+    for (int attempt = 1; attempt <= kAttempts; ++attempt)
+    {
         const int err = send_at(s, "AT+CPIN?", "READY", 500, false);
-        if (err == 0) { return 0; }
+        if (err == 0)
+        {
+            return 0;
+        }
         printk("  SIM not ready (attempt %d/%d), retrying...\n", attempt, kAttempts);
         k_sleep(K_MSEC(500));
     }
@@ -284,81 +339,107 @@ int wait_for_sim_ready(RunState &s)
 
 void report(const RunState &s)
 {
-    struct Row { const char *label; Mark a; Mark b; };
+    struct Row
+    {
+        const char *label;
+        Mark a;
+        Mark b;
+    };
     static const Row rows[] = {
-        {"modem ready -> RF on (setup)", MODEM_READY, RF_ON},
-        {"RF on -> registered", RF_ON, REGISTERED},
-        {"registered -> PDP attached", REGISTERED, ATTACHED},
-        {"attached -> socket ready", ATTACHED, SOCK_READY},
-        {"socket ready -> payload sent", SOCK_READY, SENT},
-        {"--- uplink path total ---", RF_ON, SENT},
-        {"sent -> server reply (RTT)", SENT, REPLIED},
-        {"rx wait window", SENT, RX_DONE},
-        {"rx wait end -> detached", RX_DONE, DETACHED},
-        {"detached -> deregistered", DETACHED, DEREG},
-        {"deregistered -> powered down", DEREG, POWERED_DOWN},
-        {"--- teardown total ---", RX_DONE, POWERED_DOWN},
+        {"modem ready -> RF on (setup)", MODEM_READY, RF_ON},  {"RF on -> registered", RF_ON, REGISTERED},
+        {"registered -> PDP attached", REGISTERED, ATTACHED},  {"attached -> socket ready", ATTACHED, SOCK_READY},
+        {"socket ready -> payload sent", SOCK_READY, SENT},    {"--- uplink path total ---", RF_ON, SENT},
+        {"sent -> server reply (RTT)", SENT, REPLIED},         {"rx wait window", SENT, RX_DONE},
+        {"rx wait end -> detached", RX_DONE, DETACHED},        {"detached -> deregistered", DETACHED, DEREG},
+        {"deregistered -> powered down", DEREG, POWERED_DOWN}, {"--- teardown total ---", RX_DONE, POWERED_DOWN},
     };
     printk("\n====================================================================\n");
     printk("PHASE BREAKDOWN\n");
     printk("====================================================================\n");
-    for (const auto &row : rows) {
-        if (s.valid[row.a] && s.valid[row.b]) {
+    for (const auto &row : rows)
+    {
+        if (s.valid[row.a] && s.valid[row.b])
+        {
             printk("%-34s %8.3f s\n", row.label, seconds(s.mark[row.b] - s.mark[row.a]));
-        } else {
+        }
+        else
+        {
             printk("%-34s %8s%s\n", row.label, "n/a",
                    row.b == REPLIED && !s.reply ? "   <- no %SKTRECV, nothing to measure" : "");
         }
     }
     printk("--------------------------------------------------------------------\n");
-    if (s.valid[POWERED_DOWN]) {
+    if (s.valid[POWERED_DOWN])
+    {
         const double total = seconds(s.mark[POWERED_DOWN] - s.t0);
         printk("%-34s %8.3f s\n", "CONNECTION WINDOW (power up->powered down)", total);
-        if (s.valid[SENT] && s.valid[RX_DONE]) {
+        if (s.valid[SENT] && s.valid[RX_DONE])
+        {
             const double wait = seconds(s.mark[RX_DONE] - s.mark[SENT]);
             printk("%-34s %8.3f s   <== use this for comparison\n",
-                   s.reply ? "  minus rx wait (real RTT)" : "  minus rx wait (idle timeout)",
-                   total - wait);
+                   s.reply ? "  minus rx wait (real RTT)" : "  minus rx wait (idle timeout)", total - wait);
         }
     }
     printk("====================================================================\n");
-    if (s.send_attempted && !s.sent_ok) {
+    if (s.send_attempted && !s.sent_ok)
+    {
         printk("WARNING: modem never returned OK after the payload - send unconfirmed.\n");
     }
-    if (s.reply_attempted && !s.reply) {
+    if (s.reply_attempted && !s.reply)
+    {
         printk("WARNING: no server reply within %.1f s. The 'rx wait window'\n",
                seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
         printk("         above is the timeout constant, NOT a round-trip time.\n");
         printk("         It is excluded from the comparison figure.\n");
     }
     printk("CSV,");
-    for (size_t i = 0; i < kMarkCount; ++i) {
-        if (s.valid[i]) { printk("%.4f", seconds(s.mark[i] - s.t0)); }
-        if (i + 1 < kMarkCount) { printk(","); }
+    for (size_t i = 0; i < kMarkCount; ++i)
+    {
+        if (s.valid[i])
+        {
+            printk("%.4f", seconds(s.mark[i] - s.t0));
+        }
+        if (i + 1 < kMarkCount)
+        {
+            printk(",");
+        }
     }
     printk("\n");
 }
 
 int prepare_hardware()
 {
-    if (!device_is_ready(kUart) || !gpio_is_ready_dt(&kPower) || !gpio_is_ready_dt(&kReset)) {
+    if (!device_is_ready(kUart) || !gpio_is_ready_dt(&kPower) || !gpio_is_ready_dt(&kReset))
+    {
         return -ENODEV;
     }
     int err = gpio_pin_configure_dt(&kPower, GPIO_OUTPUT_INACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     // Explicitly released (not left floating) before the first POWERKEY
     // pulse ever happens - see kReset's declaration comment for why.
     err = gpio_pin_configure_dt(&kReset, GPIO_OUTPUT_INACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 #if DT_NODE_HAS_PROP(MODEM_NODE, mdm_dtr_gpios)
-    if (!gpio_is_ready_dt(&kDtr)) { return -ENODEV; }
+    if (!gpio_is_ready_dt(&kDtr))
+    {
+        return -ENODEV;
+    }
     // Asserted once here and never released - see the board overlay's top
     // comment for why (this is a mitigation to discourage full System OFF
     // between PSM cycles, not a substitute for the POWERKEY-based wake in
     // psm_socket_round(), which stays as the documented, guaranteed
     // recovery path regardless of what this does or doesn't prevent).
     err = gpio_pin_configure_dt(&kDtr, GPIO_OUTPUT_ACTIVE);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 #endif
     // Starts with flow control off - wait_for_modem_ready() below is the
     // one place that decides when RTS/CTS gets turned on, since it also
@@ -372,15 +453,27 @@ int prepare_hardware()
         .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
     };
     err = uart_configure(kUart, &config);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     err = pm_device_runtime_get(kUart);
-    if (err != 0 && err != -EALREADY) { return err; }
+    if (err != 0 && err != -EALREADY)
+    {
+        return err;
+    }
     err = uart_callback_set(kUart, uart_event_handler, nullptr);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     ring_buf_reset(&g_uart_rx_ring);
     g_next_uart_rx_buffer = 1;
     err = uart_rx_enable(kUart, g_uart_rx_buffers[0], kUartRxBufferSize, 1000);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     return 0;
 }
 
@@ -395,7 +488,8 @@ int power_up_modem()
 {
 #if DT_NODE_EXISTS(DT_NODELABEL(modem_dcdc))
     const int domain_err = pm_device_runtime_get(kDomain);
-    if (domain_err != 0 && domain_err != -EALREADY) {
+    if (domain_err != 0 && domain_err != -EALREADY)
+    {
         printk("  modem power domain on failed (%d)\n", domain_err);
         return domain_err;
     }
@@ -441,12 +535,17 @@ int wait_for_modem_ready(RunState &s, bool mark_ready = true,
         .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
     };
     int err = uart_configure(kUart, &config);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     bool ready = false;
     const int64_t deadline = k_uptime_get() + timeout_ms;
-    while (k_uptime_get() < deadline) {
-        if (send_at(s, "AT", "OK", 300, false) == 0) {
+    while (k_uptime_get() < deadline)
+    {
+        if (send_at(s, "AT", "OK", 300, false) == 0)
+        {
             ready = true;
             break;
         }
@@ -456,11 +555,15 @@ int wait_for_modem_ready(RunState &s, bool mark_ready = true,
     config.flow_ctrl = UART_CFG_FLOW_CTRL_RTS_CTS;
     const int fc_err = uart_configure(kUart, &config);
 
-    if (!ready) {
+    if (!ready)
+    {
         printk("Modem did not respond to AT within timeout\n");
         return -ETIMEDOUT;
     }
-    if (mark_ready) { set_mark(s, MODEM_READY); }
+    if (mark_ready)
+    {
+        set_mark(s, MODEM_READY);
+    }
     return fc_err;
 }
 
@@ -473,20 +576,26 @@ int wait_for_modem_ready(RunState &s, bool mark_ready = true,
 int power_down_modem(RunState &s)
 {
     int result;
-    if (send_at(s, "AT%POWD=1", "POWERED DOWN", 5000, false) == 0) {
+    if (send_at(s, "AT%POWD=1", "POWERED DOWN", 5000, false) == 0)
+    {
         set_mark(s, POWERED_DOWN);
         g_modem_powered = false;
         result = 0;
-    } else {
+    }
+    else
+    {
         printk("  AT%%POWD=1 not confirmed - falling back to GPIO power-key pulse\n");
         const int err1 = gpio_pin_set_dt(&kPower, 1);
         k_sleep(K_MSEC(100));
         const int err2 = gpio_pin_set_dt(&kPower, 0);
         g_modem_powered = false;
-        if (err1 != 0 || err2 != 0) {
+        if (err1 != 0 || err2 != 0)
+        {
             printk("  GPIO power-off pulse failed too - modem shutdown NOT confirmed\n");
             result = -EIO;
-        } else {
+        }
+        else
+        {
             set_mark(s, POWERED_DOWN);
             result = 0;
         }
@@ -523,7 +632,15 @@ int run_firmware_update()
     s.t0 = k_uptime_get();
     int err = 0;
     const char *outcome = "FAILED";
-#define REQUIRED(expr) do { err = (expr); if (err != 0) { goto done; } } while (0)
+#define REQUIRED(expr)                                                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        err = (expr);                                                                                                  \
+        if (err != 0)                                                                                                  \
+        {                                                                                                              \
+            goto done;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
     printk("\n=== Power up ===\n");
     REQUIRED(power_up_modem());
@@ -533,8 +650,7 @@ int run_firmware_update()
     REQUIRED(send_at(s, "ATE0"));
     {
         char command[96];
-        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"",
-                 CONFIG_FIREFLY_MODEM_TEST_APN);
+        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"", CONFIG_FIREFLY_MODEM_TEST_APN);
         REQUIRED(send_at(s, command));
     }
     REQUIRED(send_at(s, "AT+COPS=0"));
@@ -544,7 +660,8 @@ int run_firmware_update()
     REQUIRED(send_at(s, "AT+CFUN=1"));
 
     printk("\n=== Waiting for +CEREG URC ===\n");
-    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true)) {
+    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true))
+    {
         printk("Network registration timed out\n");
         err = -ETIMEDOUT;
         goto done;
@@ -553,7 +670,8 @@ int run_firmware_update()
     printk("\n=== Checking current firmware version ===\n");
     {
         char current[32] = {0};
-        if (!read_cgmr_version(s, current, sizeof(current))) {
+        if (!read_cgmr_version(s, current, sizeof(current)))
+        {
             printk("Could not read AT+CGMR - aborting update\n");
             err = -EIO;
             goto done;
@@ -563,9 +681,9 @@ int run_firmware_update()
         // Delta images are relative to one specific starting version (per
         // the same Nordic guide), so a mismatch here means the configured
         // URL's package would not apply cleanly - skip rather than guess.
-        if (strcmp(current, CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION) != 0) {
-            printk("  expected mfw_nrf93m1_%s - not updating\n",
-                   CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION);
+        if (strcmp(current, CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION) != 0)
+        {
+            printk("  expected mfw_nrf93m1_%s - not updating\n", CONFIG_FIREFLY_MODEM_FW_UPDATE_FROM_VERSION);
             outcome = "NO-OP (version mismatch)";
             err = 0;
             goto done;
@@ -575,15 +693,14 @@ int run_firmware_update()
                CONFIG_FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S);
         {
             char command[300];
-            snprintk(command, sizeof(command), "AT%%HTTPFOTADL=\"%s\",100",
-                     CONFIG_FIREFLY_MODEM_FW_UPDATE_URL);
+            snprintk(command, sizeof(command), "AT%%HTTPFOTADL=\"%s\",100", CONFIG_FIREFLY_MODEM_FW_UPDATE_URL);
             // "OK" here only means the command was accepted, not that the
             // download succeeded - the real outcome comes via the
             // %HTTPURC: "FOTA",... lines read_until() waits for next.
             REQUIRED(send_at(s, command, "OK", 10000));
         }
-        if (!read_until(s, "VERIFIED",
-                        CONFIG_FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S * 1000)) {
+        if (!read_until(s, "VERIFIED", CONFIG_FIREFLY_MODEM_FW_UPDATE_DOWNLOAD_TIMEOUT_S * 1000))
+        {
             printk("Did not see %%HTTPURC \"FOTA\",\"VERIFIED\" in time - see the RX\n"
                    "lines above for what the modem actually reported (a\n"
                    "DOWNLOAD ERROR or VERIFICATION FAILURE detail, if any,\n"
@@ -598,19 +715,22 @@ int run_firmware_update()
         // is not a power-key wake, just re-polling "AT" until it answers
         // again, same as wait_for_modem_ready()'s normal job.
         flush_rx();
-        REQUIRED(wait_for_modem_ready(s, false,
-                                      CONFIG_FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S * 1000));
+        REQUIRED(wait_for_modem_ready(s, false, CONFIG_FIREFLY_MODEM_FW_UPDATE_REBOOT_TIMEOUT_S * 1000));
 
         char updated[32] = {0};
-        if (!read_cgmr_version(s, updated, sizeof(updated))) {
+        if (!read_cgmr_version(s, updated, sizeof(updated)))
+        {
             printk("Modem came back but AT+CGMR did not respond as expected\n");
             err = -EIO;
             goto done;
         }
         printk("  modem firmware is now: mfw_nrf93m1_%s\n", updated);
-        if (strcmp(updated, CONFIG_FIREFLY_MODEM_FW_UPDATE_TO_VERSION) == 0) {
+        if (strcmp(updated, CONFIG_FIREFLY_MODEM_FW_UPDATE_TO_VERSION) == 0)
+        {
             outcome = "SUCCESS";
-        } else {
+        }
+        else
+        {
             outcome = "FAILED (unexpected version after update)";
             err = -EIO;
         }
@@ -634,7 +754,15 @@ int run_test()
     RunState s{};
     s.t0 = k_uptime_get();
     int err = 0;
-#define REQUIRED(expr) do { err = (expr); if (err != 0) { goto done; } } while (0)
+#define REQUIRED(expr)                                                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        err = (expr);                                                                                                  \
+        if (err != 0)                                                                                                  \
+        {                                                                                                              \
+            goto done;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
     LOG_INF("\n=== Power up ===\n");
     printk("\n=== Power up ===\n");
@@ -663,8 +791,7 @@ int run_test()
     REQUIRED(send_at(s, "AT%SKTDELETE=all"));
     {
         char command[96];
-        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"",
-                 CONFIG_FIREFLY_MODEM_TEST_APN);
+        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"", CONFIG_FIREFLY_MODEM_TEST_APN);
         REQUIRED(send_at(s, command));
     }
     REQUIRED(send_at(s, "AT+COPS=0"));
@@ -675,14 +802,15 @@ int run_test()
     REQUIRED(send_at(s, "AT+CFUN=1"));
 
     printk("\n=== Waiting for +CEREG URC ===\n");
-    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true)) {
+    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true))
+    {
         printk("Network registration timed out\n");
         err = -ETIMEDOUT;
         goto done;
     }
     set_mark(s, REGISTERED);
-    printk("  registered at %.4f s (+%.3f s after RF on)\n",
-           seconds(s.mark[REGISTERED] - s.t0), seconds(s.mark[REGISTERED] - s.mark[RF_ON]));
+    printk("  registered at %.4f s (+%.3f s after RF on)\n", seconds(s.mark[REGISTERED] - s.t0),
+           seconds(s.mark[REGISTERED] - s.mark[RF_ON]));
 
     printk("\n=== Attach ===\n");
     REQUIRED(send_at(s, "AT+CGATT=1"));
@@ -692,8 +820,8 @@ int run_test()
     REQUIRED(send_at(s, "AT%SKTCREATE=1,2,17"));
     {
         char command[96];
-        snprintk(command, sizeof(command), "AT%%SKTCONNECT=0,\"%s\",%d",
-                 CONFIG_FIREFLY_MODEM_TEST_SERVER_IP, CONFIG_FIREFLY_MODEM_TEST_SERVER_PORT);
+        snprintk(command, sizeof(command), "AT%%SKTCONNECT=0,\"%s\",%d", CONFIG_FIREFLY_MODEM_TEST_SERVER_IP,
+                 CONFIG_FIREFLY_MODEM_TEST_SERVER_PORT);
         REQUIRED(send_at(s, command));
     }
     set_mark(s, SOCK_READY);
@@ -706,7 +834,8 @@ int run_test()
         static const char hex[] = "0123456789abcdef";
         printk("  TX(DATA) %u bytes -> %u hex chars\n", static_cast<unsigned>(sizeof(message) - 1),
                static_cast<unsigned>(2 * (sizeof(message) - 1)));
-        for (size_t i = 0; i < sizeof(message) - 1; ++i) {
+        for (size_t i = 0; i < sizeof(message) - 1; ++i)
+        {
             const uint8_t c = static_cast<uint8_t>(message[i]);
             uart_poll_out(kUart, hex[c >> 4]);
             uart_poll_out(kUart, hex[c & 0xf]);
@@ -715,17 +844,22 @@ int run_test()
     }
     s.sent_ok = read_until(s, "OK", 10000);
     set_mark(s, SENT);
-    if (!s.sent_ok) { printk("  WARNING: no OK after payload - modem did not confirm the send\n"); }
+    if (!s.sent_ok)
+    {
+        printk("  WARNING: no OK after payload - modem did not confirm the send\n");
+    }
 
-    printk("\n=== Waiting up to %.0f s for %%SKTRECV ===\n",
-           seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
+    printk("\n=== Waiting up to %.0f s for %%SKTRECV ===\n", seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
     s.reply_attempted = true;
     s.reply = read_until(s, "SKTRECV", CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS);
     set_mark(s, RX_DONE);
-    if (s.reply) {
+    if (s.reply)
+    {
         set_mark(s, REPLIED);
         printk("  reply received, RTT %.1f ms\n", static_cast<double>(s.mark[RX_DONE] - s.mark[SENT]));
-    } else {
+    }
+    else
+    {
         printk("  NO REPLY -- waited %.3f s, which is just RX_WAIT (%.1f s).\n",
                seconds(s.mark[RX_DONE] - s.mark[SENT]), seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
         printk("  This is a timeout, not a measurement. Excluded from the total.\n");
@@ -785,40 +919,57 @@ int psm_socket_round(RunState &s, int cycle)
 {
     printk("\n=== PSM cycle %d/%d: wake ===\n", cycle, kPsmCycleCount);
     int err = power_up_modem();
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     err = wait_for_modem_ready(s, false);
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
 
     printk("\n=== PSM cycle %d/%d: socket ===\n", cycle, kPsmCycleCount);
     err = send_at(s, "AT%SKTCREATE=1,2,17");
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     {
         char command[96];
-        snprintk(command, sizeof(command), "AT%%SKTCONNECT=0,\"%s\",%d",
-                 CONFIG_FIREFLY_MODEM_TEST_SERVER_IP, CONFIG_FIREFLY_MODEM_TEST_SERVER_PORT);
+        snprintk(command, sizeof(command), "AT%%SKTCONNECT=0,\"%s\",%d", CONFIG_FIREFLY_MODEM_TEST_SERVER_IP,
+                 CONFIG_FIREFLY_MODEM_TEST_SERVER_PORT);
         err = send_at(s, command);
-        if (err != 0) { return err; }
+        if (err != 0)
+        {
+            return err;
+        }
     }
 
     printk("\n=== PSM cycle %d/%d: send ===\n", cycle, kPsmCycleCount);
     err = send_at(s, "AT%SKTSENDT=0", ">");
-    if (err != 0) { return err; }
+    if (err != 0)
+    {
+        return err;
+    }
     {
         static const char message[] = CONFIG_FIREFLY_MODEM_TEST_MESSAGE;
         static const char hex[] = "0123456789abcdef";
-        for (size_t i = 0; i < sizeof(message) - 1; ++i) {
+        for (size_t i = 0; i < sizeof(message) - 1; ++i)
+        {
             const uint8_t c = static_cast<uint8_t>(message[i]);
             uart_poll_out(kUart, hex[c >> 4]);
             uart_poll_out(kUart, hex[c & 0xf]);
         }
         uart_poll_out(kUart, 0x1a);
     }
-    if (!read_until(s, "OK", 10000)) {
+    if (!read_until(s, "OK", 10000))
+    {
         printk("  WARNING: no OK after payload - modem did not confirm the send\n");
     }
-    if (!read_until(s, "SKTRECV", CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS)) {
-        printk("  NO REPLY within %.1f s (timeout, not measured)\n",
-               seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
+    if (!read_until(s, "SKTRECV", CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS))
+    {
+        printk("  NO REPLY within %.1f s (timeout, not measured)\n", seconds(CONFIG_FIREFLY_MODEM_TEST_RX_WAIT_MS));
     }
     return send_at(s, "AT%SKTDELETE=all");
 }
@@ -844,7 +995,15 @@ int run_psm_cycle_test()
     RunState s{};
     s.t0 = k_uptime_get();
     int err = 0;
-#define REQUIRED(expr) do { err = (expr); if (err != 0) { goto done; } } while (0)
+#define REQUIRED(expr)                                                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        err = (expr);                                                                                                  \
+        if (err != 0)                                                                                                  \
+        {                                                                                                              \
+            goto done;                                                                                                 \
+        }                                                                                                              \
+    } while (0)
 
     printk("\n=== Power up ===\n");
     REQUIRED(power_up_modem());
@@ -862,8 +1021,7 @@ int run_psm_cycle_test()
     REQUIRED(send_at(s, "AT%SKTDELETE=all"));
     {
         char command[96];
-        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"",
-                 CONFIG_FIREFLY_MODEM_TEST_APN);
+        snprintk(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"", CONFIG_FIREFLY_MODEM_TEST_APN);
         REQUIRED(send_at(s, command));
     }
     REQUIRED(send_at(s, "AT+COPS=0"));
@@ -896,7 +1054,8 @@ int run_psm_cycle_test()
 
     printk("\n=== RF on ===\n");
     REQUIRED(send_at(s, "AT+CFUN=1"));
-    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true)) {
+    if (!read_until(s, nullptr, CONFIG_FIREFLY_MODEM_TEST_REG_TIMEOUT_S * 1000, true))
+    {
         printk("Network registration timed out\n");
         err = -ETIMEDOUT;
         goto done;
@@ -905,7 +1064,8 @@ int run_psm_cycle_test()
     printk("\n=== Attach ===\n");
     REQUIRED(send_at(s, "AT+CGATT=1"));
 
-    for (int cycle = 1; cycle <= kPsmCycleCount; ++cycle) {
+    for (int cycle = 1; cycle <= kPsmCycleCount; ++cycle)
+    {
         REQUIRED(psm_socket_round(s, cycle));
 
         // No AT+CPSMS toggling here on purpose: disabling PSM would
@@ -922,16 +1082,16 @@ int run_psm_cycle_test()
         // anything here; the RRC-release/Active-Time/PSM transition this
         // comment describes already happens from the module's own natural
         // behavior once nothing is sent during the idle window below.
-        printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n",
-               cycle, kPsmCycleCount, kPsmIdleSeconds);
+        printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n", cycle, kPsmCycleCount,
+               kPsmIdleSeconds);
         k_sleep(K_SECONDS(kPsmIdleSeconds));
         flush_rx();
     }
 
-    REQUIRED(psm_socket_round(s, kPsmCycleCount+1));
+    REQUIRED(psm_socket_round(s, kPsmCycleCount + 1));
 
-    printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n",
-            kPsmCycleCount+1, kPsmCycleCount, kPsmIdleSeconds);
+    printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n", kPsmCycleCount + 1,
+           kPsmCycleCount, kPsmIdleSeconds);
     flush_rx();
 
     printk("\n=== Teardown ===\n");
@@ -949,34 +1109,59 @@ done:
 
 #endif
 
-class SrvModemTest final : public firefly::Thread<CONFIG_FIREFLY_MODEM_TEST_STACK_SIZE> {
-public:
-    SrvModemTest() : Thread(5, "srvModemTest") { k_sem_init(&processed_sem_, 0, 1); }
+class SrvModemTest final : public firefly::Thread<CONFIG_FIREFLY_MODEM_TEST_STACK_SIZE>
+{
+  public:
+    SrvModemTest() : Thread(5, "srvModemTest")
+    {
+        k_sem_init(&processed_sem_, 0, 1);
+    }
     int startTest(const struct zbus_observer *subscriber)
     {
-        if (subscriber == nullptr || subscriber->type != ZBUS_OBSERVER_MSG_SUBSCRIBER_TYPE) {
+        if (subscriber == nullptr || subscriber->type != ZBUS_OBSERVER_MSG_SUBSCRIBER_TYPE)
+        {
             return -EINVAL;
         }
-        if (isRunning()) { return -EALREADY; }
+        if (isRunning())
+        {
+            return -EALREADY;
+        }
 #ifdef CONFIG_FIREFLY_MODEM_TEST_NRF93M1
         const int err = prepare_hardware();
-        if (err != 0) { return err; }
+        if (err != 0)
+        {
+            return err;
+        }
 #endif
         subscriber_ = subscriber;
         return start();
     }
-    int lastResult() const { return has_result_ ? last_result_ : -ENODATA; }
-    uint32_t count() const { return static_cast<uint32_t>(atomic_get(&processed_)); }
+    int lastResult() const
+    {
+        return has_result_ ? last_result_ : -ENODATA;
+    }
+    uint32_t count() const
+    {
+        return static_cast<uint32_t>(atomic_get(&processed_));
+    }
     int waitProcessed(uint32_t previous, int32_t timeout_ms)
     {
-        if (timeout_ms < 0) { return -EINVAL; }
-        while (count() <= previous) {
+        if (timeout_ms < 0)
+        {
+            return -EINVAL;
+        }
+        while (count() <= previous)
+        {
             const int error = k_sem_take(&processed_sem_, K_MSEC(timeout_ms));
-            if (error != 0) { return error; }
+            if (error != 0)
+            {
+                return error;
+            }
         }
         return 0;
     }
-protected:
+
+  protected:
     void run() override
     {
         // Button numbering is Zephyr's bus index (0-based), not DK silkscreen
@@ -984,19 +1169,30 @@ protected:
         // "Button 2" = button1 = index 1. This board has no third button.
         printk("srvModemTest_nrf93m1 ready - waiting for Button 1 (single round) / "
                "Button 2 (%s)\n",
-               IS_ENABLED(CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1)
-                   ? "firmware update"
-                   : "PSM cycle");
-        while (!shouldStop()) {
+               IS_ENABLED(CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1) ? "firmware update" : "PSM cycle");
+        while (!shouldStop())
+        {
             const struct zbus_channel *channel = nullptr;
             struct bus_msg message{};
             const int rc = zbus_sub_wait_msg(subscriber_, &channel, &message, K_MSEC(50));
-            if (rc == -ENOMSG || rc == -EAGAIN) { continue; }
-            if (rc != 0 || channel != &bus_chan) { continue; }
+            if (rc == -ENOMSG || rc == -EAGAIN)
+            {
+                continue;
+            }
+            if (rc != 0 || channel != &bus_chan)
+            {
+                continue;
+            }
             if (message.kind != BUS_MSG_BUTTON || !bus_button_is_valid(&message.data.button) ||
-                !message.data.button.pressed) { continue; }
+                !message.data.button.pressed)
+            {
+                continue;
+            }
             const uint8_t button = message.data.button.button;
-            if (button != 0 && button != 1) { continue; }
+            if (button != 0 && button != 1)
+            {
+                continue;
+            }
 #ifdef CONFIG_FIREFLY_MODEM_TEST_NRF93M1
             k_mutex_lock(&g_modem_lock, K_FOREVER);
 #ifdef CONFIG_FIREFLY_MODEM_FW_UPDATE_NRF93M1
@@ -1013,7 +1209,8 @@ protected:
             k_sem_give(&processed_sem_);
         }
     }
-private:
+
+  private:
     const struct zbus_observer *subscriber_ = nullptr;
     int last_result_ = 0;
     bool has_result_ = false;
@@ -1051,12 +1248,14 @@ SrvModemTest g_test;
 // during the seconds a round holds g_modem_lock, i.e. never.
 int claim_modem(const struct shell *sh)
 {
-    if (!srvModemTest_nrf93m1_is_running()) {
+    if (!srvModemTest_nrf93m1_is_running())
+    {
         shell_error(sh, "srvModemTest is not running - the modem UART has not "
                         "been set up (prepare_hardware() runs at service start)");
         return -ENODEV;
     }
-    if (k_mutex_lock(&g_modem_lock, K_MSEC(100)) != 0) {
+    if (k_mutex_lock(&g_modem_lock, K_MSEC(100)) != 0)
+    {
         shell_error(sh, "modem busy - a test round is in progress");
         return -EBUSY;
     }
@@ -1066,14 +1265,20 @@ int claim_modem(const struct shell *sh)
 int cmd_modem_on(const struct shell *sh, size_t, char **)
 {
     const int claim = claim_modem(sh);
-    if (claim != 0) { return claim; }
+    if (claim != 0)
+    {
+        return claim;
+    }
 
     RunState state{};
     state.t0 = k_uptime_get();
     int err = 0;
-    if (g_modem_powered) {
+    if (g_modem_powered)
+    {
         shell_print(sh, "modem already powered - re-syncing");
-    } else {
+    }
+    else
+    {
         err = power_up_modem();
     }
     // Plain wait_for_modem_ready(). The uart9600 branch calls its
@@ -1082,10 +1287,14 @@ int cmd_modem_on(const struct shell *sh, size_t, char **)
     // branch keeps the POWERKEY-based PSM wake and never sets a baud rate on
     // the modem, so nothing can leave it at a stale one - it is always
     // expected to answer at 115200.
-    if (err == 0) { err = wait_for_modem_ready(state); }
+    if (err == 0)
+    {
+        err = wait_for_modem_ready(state);
+    }
     k_mutex_unlock(&g_modem_lock);
 
-    if (err != 0) {
+    if (err != 0)
+    {
         shell_error(sh, "modem did not become ready (%d)", err);
         return err;
     }
@@ -1096,14 +1305,18 @@ int cmd_modem_on(const struct shell *sh, size_t, char **)
 int cmd_modem_off(const struct shell *sh, size_t, char **)
 {
     const int claim = claim_modem(sh);
-    if (claim != 0) { return claim; }
+    if (claim != 0)
+    {
+        return claim;
+    }
 
     RunState state{};
     state.t0 = k_uptime_get();
     const int err = power_down_modem(state);
     k_mutex_unlock(&g_modem_lock);
 
-    if (err != 0) {
+    if (err != 0)
+    {
         shell_error(sh, "power down failed (%d)", err);
         return err;
     }
@@ -1115,18 +1328,24 @@ int cmd_modem_at(const struct shell *sh, size_t argc, char **argv)
 {
     // Quote commands containing spaces: modem at "AT+CGDCONT=1,\"IP\",\"apn\""
     int32_t timeout_ms = 5000;
-    if (argc >= 3) {
+    if (argc >= 3)
+    {
         timeout_ms = static_cast<int32_t>(strtol(argv[2], nullptr, 10));
-        if (timeout_ms < 1 || timeout_ms > 120000) {
+        if (timeout_ms < 1 || timeout_ms > 120000)
+        {
             shell_error(sh, "timeout_ms must be 1..120000");
             return -EINVAL;
         }
     }
 
     const int claim = claim_modem(sh);
-    if (claim != 0) { return claim; }
+    if (claim != 0)
+    {
+        return claim;
+    }
 
-    if (!g_modem_powered) {
+    if (!g_modem_powered)
+    {
         k_mutex_unlock(&g_modem_lock);
         shell_error(sh, "modem is not powered - run \"modem on\" first");
         return -EACCES;
@@ -1141,23 +1360,23 @@ int cmd_modem_at(const struct shell *sh, size_t argc, char **argv)
     const int err = send_at(state, argv[1], "OK", timeout_ms, false);
     k_mutex_unlock(&g_modem_lock);
 
-    if (err != 0) {
-        shell_warn(sh, "no \"OK\" within %d ms - see the RX lines above for what "
-                       "the modem actually returned",
+    if (err != 0)
+    {
+        shell_warn(sh,
+                   "no \"OK\" within %d ms - see the RX lines above for what "
+                   "the modem actually returned",
                    timeout_ms);
     }
     return 0;
 }
 
 #endif // CONFIG_SHELL && CONFIG_FIREFLY_MODEM_TEST_NRF93M1
-}
+} // namespace
 
 #if defined(CONFIG_SHELL) && defined(CONFIG_FIREFLY_MODEM_TEST_NRF93M1)
 SHELL_STATIC_SUBCMD_SET_CREATE(
-    modem_subcmds,
-    SHELL_CMD_ARG(on, NULL, "Power the modem up and wait until it answers AT", cmd_modem_on, 1, 0),
-    SHELL_CMD_ARG(off, NULL, "Power the modem down (AT%POWD=1, GPIO pulse fallback)",
-                  cmd_modem_off, 1, 0),
+    modem_subcmds, SHELL_CMD_ARG(on, NULL, "Power the modem up and wait until it answers AT", cmd_modem_on, 1, 0),
+    SHELL_CMD_ARG(off, NULL, "Power the modem down (AT%POWD=1, GPIO pulse fallback)", cmd_modem_off, 1, 0),
     SHELL_CMD_ARG(at, NULL,
                   "Send one AT command: modem at <command> [timeout_ms]\n"
                   "Quote commands containing spaces or commas with embedded quotes.",
@@ -1170,10 +1389,22 @@ extern "C" int srvModemTest_nrf93m1_start(const struct zbus_observer *subscriber
 {
     return g_test.startTest(subscriber);
 }
-extern "C" int srvModemTest_nrf93m1_stop(void) { return g_test.stop(); }
-extern "C" bool srvModemTest_nrf93m1_is_running(void) { return g_test.isRunning(); }
-extern "C" int srvModemTest_nrf93m1_last_result(void) { return g_test.lastResult(); }
-extern "C" uint32_t srvModemTest_nrf93m1_processed_count(void) { return g_test.count(); }
+extern "C" int srvModemTest_nrf93m1_stop(void)
+{
+    return g_test.stop();
+}
+extern "C" bool srvModemTest_nrf93m1_is_running(void)
+{
+    return g_test.isRunning();
+}
+extern "C" int srvModemTest_nrf93m1_last_result(void)
+{
+    return g_test.lastResult();
+}
+extern "C" uint32_t srvModemTest_nrf93m1_processed_count(void)
+{
+    return g_test.count();
+}
 extern "C" int srvModemTest_nrf93m1_wait_processed(uint32_t previous_count, int32_t timeout_ms)
 {
     return g_test.waitProcessed(previous_count, timeout_ms);

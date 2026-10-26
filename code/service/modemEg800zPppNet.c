@@ -38,7 +38,7 @@ MODEM_PPP_DEFINE(modem_eg800z_ppp, NULL, 98, 1500);
 
 struct modem_ppp *modemEg800zPpp_ppp(void)
 {
-	return &modem_eg800z_ppp;
+    return &modem_eg800z_ppp;
 }
 
 #else
@@ -47,7 +47,7 @@ struct modem_ppp;
 
 struct modem_ppp *modemEg800zPpp_ppp(void)
 {
-	return NULL;
+    return NULL;
 }
 
 #endif

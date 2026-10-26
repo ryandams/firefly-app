@@ -62,15 +62,15 @@
 
 LOG_MODULE_REGISTER(srvNetwork, CONFIG_FIREFLY_LOG_LEVEL);
 
-namespace {
+namespace
+{
 
 int64_t g_round_start_ms;
 
 void trace_point(const char *stage)
 {
     const int64_t now = k_uptime_get();
-    LOG_INF("NETTRACE t=%lld ms elapsed=%lld ms | %s",
-            static_cast<long long>(now),
+    LOG_INF("NETTRACE t=%lld ms elapsed=%lld ms | %s", static_cast<long long>(now),
             static_cast<long long>(now - g_round_start_ms), stage);
 }
 
@@ -85,7 +85,8 @@ K_EVENT_DEFINE(g_l4_event);
 // AT phases (registration, PDP attach, PPP LCP/IPCP) the raw-AT test does -
 // Zephyr only surfaces the single NET_EVENT_L4_CONNECTED once all of that is
 // done - so those are collapsed into one "iface up -> L4 connected" span.
-enum Mark : size_t {
+enum Mark : size_t
+{
     MODEM_RESUME_DONE,
     IF_UP_DONE,
     L4_CONNECTED,
@@ -97,7 +98,8 @@ enum Mark : size_t {
     kMarkCount
 };
 
-struct RoundMarks {
+struct RoundMarks
+{
     int64_t t[kMarkCount];
     bool valid[kMarkCount];
 };
@@ -116,17 +118,19 @@ void mark(Mark m)
 // for the one board that already turns it on).
 void format_seconds(char *buf, size_t len, int64_t ms)
 {
-    snprintk(buf, len, "%lld.%03lld", static_cast<long long>(ms / 1000),
-             static_cast<long long>(ms % 1000));
+    snprintk(buf, len, "%lld.%03lld", static_cast<long long>(ms / 1000), static_cast<long long>(ms % 1000));
 }
 
 void report_phase(const char *label, Mark a, Mark b)
 {
-    if (g_marks.valid[a] && g_marks.valid[b]) {
+    if (g_marks.valid[a] && g_marks.valid[b])
+    {
         char buf[32];
         format_seconds(buf, sizeof(buf), g_marks.t[b] - g_marks.t[a]);
         LOG_INF("PHASE %-34s %8s s", label, buf);
-    } else {
+    }
+    else
+    {
         LOG_INF("PHASE %-34s %8s", label, "n/a");
     }
 }
@@ -145,43 +149,47 @@ void report(int64_t round_start_ms)
     report_phase("iface down -> modem suspended", IF_DOWN_DONE, MODEM_SUSPEND_DONE);
     report_phase("--- teardown total ---", DISCONNECT_BEGIN, MODEM_SUSPEND_DONE);
     LOG_INF("--------------------------------------------------------------------");
-    if (g_marks.valid[MODEM_SUSPEND_DONE]) {
+    if (g_marks.valid[MODEM_SUSPEND_DONE])
+    {
         char buf[32];
         format_seconds(buf, sizeof(buf), g_marks.t[MODEM_SUSPEND_DONE] - round_start_ms);
         LOG_INF("%-38s %8s s", "CONNECTION WINDOW (button->suspended)", buf);
-        if (g_marks.valid[SENT] && g_marks.valid[DISCONNECT_BEGIN]) {
+        if (g_marks.valid[SENT] && g_marks.valid[DISCONNECT_BEGIN])
+        {
             const int64_t settle = g_marks.t[DISCONNECT_BEGIN] - g_marks.t[SENT];
-            format_seconds(buf, sizeof(buf),
-                            g_marks.t[MODEM_SUSPEND_DONE] - round_start_ms - settle);
-            LOG_INF("  minus send settle (artificial delay) %8s s   <== use this for comparison",
-                    buf);
+            format_seconds(buf, sizeof(buf), g_marks.t[MODEM_SUSPEND_DONE] - round_start_ms - settle);
+            LOG_INF("  minus send settle (artificial delay) %8s s   <== use this for comparison", buf);
         }
     }
     LOG_INF("====================================================================");
 }
 
-void l4_event_handler(uint64_t event, struct net_if *iface, void *info,
-                       size_t info_length, void *user_data)
+void l4_event_handler(uint64_t event, struct net_if *iface, void *info, size_t info_length, void *user_data)
 {
     ARG_UNUSED(info);
     ARG_UNUSED(info_length);
     ARG_UNUSED(user_data);
 
-    if (iface != net_if_get_first_by_type(&NET_L2_GET_NAME(PPP))) { return; }
+    if (iface != net_if_get_first_by_type(&NET_L2_GET_NAME(PPP)))
+    {
+        return;
+    }
 
-    if (event == NET_EVENT_L4_CONNECTED) {
+    if (event == NET_EVENT_L4_CONNECTED)
+    {
         trace_point("NET_EVENT_L4_CONNECTED received (PPP/IPv4 usable)");
         mark(L4_CONNECTED);
         k_event_post(&g_l4_event, kL4Connected);
-    } else if (event == NET_EVENT_L4_DISCONNECTED) {
+    }
+    else if (event == NET_EVENT_L4_DISCONNECTED)
+    {
         trace_point("NET_EVENT_L4_DISCONNECTED received");
         k_event_set(&g_l4_event, 0);
     }
 }
 
-NET_MGMT_REGISTER_EVENT_HANDLER(srv_network_l4,
-                                 NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED,
-                                 l4_event_handler, NULL);
+NET_MGMT_REGISTER_EVENT_HANDLER(srv_network_l4, NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED, l4_event_handler,
+                                NULL);
 
 /* The modem sits behind a GPIO power domain on boards that have one (see
  * modem_dcdc in the board's own devicetree). That rail, and the modem
@@ -211,7 +219,8 @@ NET_MGMT_REGISTER_EVENT_HANDLER(srv_network_l4,
 int modem_domain_on(void)
 {
     const int err = pm_device_runtime_get(DEVICE_DT_GET(DT_NODELABEL(modem_dcdc)));
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("modem power domain on failed (%d)", err);
     }
     return err;
@@ -227,18 +236,31 @@ int modem_domain_off(void)
  * wired modem with only mdm-power-gpios) - nothing to pre-claim, the
  * modem's own resume in modem_connect() is the first thing that touches it
  * either way. */
-int modem_domain_on(void) { return 0; }
-int modem_domain_off(void) { return 0; }
+int modem_domain_on(void)
+{
+    return 0;
+}
+int modem_domain_off(void)
+{
+    return 0;
+}
 #endif
 
-int modem_power_on(void *) { return 0; }
-int modem_power_off(void *) { return 0; }
+int modem_power_on(void *)
+{
+    return 0;
+}
+int modem_power_off(void *)
+{
+    return 0;
+}
 
 int modem_connect(void *)
 {
     struct net_if *iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
 
-    if (iface == nullptr) {
+    if (iface == nullptr)
+    {
         LOG_ERR("no PPP network interface - is &modem enabled in the devicetree?");
         return -ENODEV;
     }
@@ -258,11 +280,13 @@ int modem_connect(void *)
     // previous round queried. Empty on the very first round ever;
     // populated from round 2 onward.
     char fw_version[64] = {};
-    if (cellular_get_modem_info(modem, CELLULAR_MODEM_INFO_FW_VERSION, fw_version,
-                                 sizeof(fw_version)) == 0 &&
-        fw_version[0] != '\0') {
+    if (cellular_get_modem_info(modem, CELLULAR_MODEM_INFO_FW_VERSION, fw_version, sizeof(fw_version)) == 0 &&
+        fw_version[0] != '\0')
+    {
         LOG_INF("modem firmware version: %s", fw_version);
-    } else {
+    }
+    else
+    {
         LOG_INF("modem firmware version: not yet queried (available from next round)");
     }
 #endif
@@ -273,7 +297,8 @@ int modem_connect(void *)
     trace_point("modem power domain on begin");
     int err = modem_domain_on();
     trace_point(err == 0 ? "modem power domain on complete" : "modem power domain on failed");
-    if (err != 0) {
+    if (err != 0)
+    {
         LOG_ERR("modem domain resume failed (%d)", err);
         return err;
     }
@@ -285,18 +310,18 @@ int modem_connect(void *)
     // LCP/AUTH/IPCP inside this round's phase timing.
     trace_point("EG800Z link_up begin (AT setup/SIM/registration/ATD*99#)");
     err = modemEg800zPpp_link_up();
-    trace_point(err == 0 ? "EG800Z link_up complete (data mode)"
-                         : "EG800Z link_up failed");
-    if (err != 0) {
+    trace_point(err == 0 ? "EG800Z link_up complete (data mode)" : "EG800Z link_up failed");
+    if (err != 0)
+    {
         LOG_ERR("EG800Z link_up failed (%d)", err);
         return err;
     }
 #else
     trace_point("pm_device_runtime_get(modem) begin (power pulse/modem init/AT setup)");
     err = pm_device_runtime_get(modem);
-    trace_point(err == 0 ? "pm_device_runtime_get(modem) complete"
-                         : "pm_device_runtime_get(modem) failed");
-    if (err != 0) {
+    trace_point(err == 0 ? "pm_device_runtime_get(modem) complete" : "pm_device_runtime_get(modem) failed");
+    if (err != 0)
+    {
         LOG_ERR("modem resume failed (%d)", err);
         return err;
     }
@@ -305,19 +330,19 @@ int modem_connect(void *)
 
     trace_point("net_if_up(PPP) begin (registration/PDP/PPP may occur hereafter)");
     err = net_if_up(iface);
-    trace_point((err == 0 || err == -EALREADY) ? "net_if_up(PPP) returned"
-                                                : "net_if_up(PPP) failed");
-    if (err != 0 && err != -EALREADY) {
+    trace_point((err == 0 || err == -EALREADY) ? "net_if_up(PPP) returned" : "net_if_up(PPP) failed");
+    if (err != 0 && err != -EALREADY)
+    {
         LOG_ERR("net_if_up failed (%d)", err);
         return err;
     }
     mark(IF_UP_DONE);
 
     trace_point("waiting for NET_EVENT_L4_CONNECTED");
-    const uint32_t events = k_event_wait(
-        &g_l4_event, kL4Connected, false,
-        K_SECONDS(CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S));
-    if (events != kL4Connected) {
+    const uint32_t events =
+        k_event_wait(&g_l4_event, kL4Connected, false, K_SECONDS(CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S));
+    if (events != kL4Connected)
+    {
         trace_point("L4/PPP connectivity wait timed out");
         LOG_ERR("timed out waiting for PPP connectivity");
         return -ETIMEDOUT;
@@ -332,14 +357,16 @@ int modem_send(void *, const void *data, size_t len)
     struct sockaddr_in dest = {};
     dest.sin_family = AF_INET;
     dest.sin_port = htons(CONFIG_FIREFLY_NETWORK_DEST_PORT);
-    if (net_addr_pton(AF_INET, CONFIG_FIREFLY_NETWORK_DEST_IP, &dest.sin_addr) != 0) {
+    if (net_addr_pton(AF_INET, CONFIG_FIREFLY_NETWORK_DEST_IP, &dest.sin_addr) != 0)
+    {
         LOG_ERR("bad CONFIG_FIREFLY_NETWORK_DEST_IP %s", CONFIG_FIREFLY_NETWORK_DEST_IP);
         return -EINVAL;
     }
 
     trace_point("socket(AF_INET, SOCK_DGRAM) begin");
     const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
+    if (sock < 0)
+    {
         LOG_ERR("socket() failed (%d)", errno);
         return -errno;
     }
@@ -347,13 +374,16 @@ int modem_send(void *, const void *data, size_t len)
     mark(SOCK_CREATED);
 
     trace_point("sendto() begin");
-    const ssize_t sent = sendto(sock, data, len, 0,
-                                 reinterpret_cast<struct sockaddr *>(&dest), sizeof(dest));
+    const ssize_t sent = sendto(sock, data, len, 0, reinterpret_cast<struct sockaddr *>(&dest), sizeof(dest));
     const int send_errno = errno;
     trace_point(sent >= 0 ? "sendto() returned success" : "sendto() returned failure");
-    if (sent >= 0) { mark(SENT); }
+    if (sent >= 0)
+    {
+        mark(SENT);
+    }
 
-    if (sent >= 0) {
+    if (sent >= 0)
+    {
         // sendto() returning success only means the payload was queued by
         // the local UDP/IP stack - it says nothing about whether it has
         // actually drained out over the modem UART yet. The destination
@@ -371,24 +401,25 @@ int modem_send(void *, const void *data, size_t len)
         struct timeval rcv_timeout = {};
         rcv_timeout.tv_sec = CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS / 1000;
         rcv_timeout.tv_usec = (CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS % 1000) * 1000;
-        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout)) != 0) {
-            LOG_WRN("setsockopt(SO_RCVTIMEO) failed (%d) - echo wait may block indefinitely",
-                    errno);
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout)) != 0)
+        {
+            LOG_WRN("setsockopt(SO_RCVTIMEO) failed (%d) - echo wait may block indefinitely", errno);
         }
 
         trace_point("waiting for echo (bounded by SEND_SETTLE as a timeout)");
         char echo_buf[64];
         struct sockaddr_in from = {};
         socklen_t from_len = sizeof(from);
-        const ssize_t echoed = recvfrom(sock, echo_buf, sizeof(echo_buf), 0,
-                                         reinterpret_cast<struct sockaddr *>(&from), &from_len);
+        const ssize_t echoed =
+            recvfrom(sock, echo_buf, sizeof(echo_buf), 0, reinterpret_cast<struct sockaddr *>(&from), &from_len);
         trace_point(echoed > 0 ? "echo received" : "no echo within timeout - proceeding anyway");
     }
 
     close(sock);
     trace_point("UDP socket closed");
 
-    if (sent < 0 || static_cast<size_t>(sent) != len) {
+    if (sent < 0 || static_cast<size_t>(sent) != len)
+    {
         LOG_ERR("sendto() failed (%d)", send_errno);
         return -send_errno;
     }
@@ -404,7 +435,8 @@ int modem_disconnect(void *)
     struct net_if *iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
     trace_point("disconnect begin");
     mark(DISCONNECT_BEGIN);
-    if (iface != nullptr) {
+    if (iface != nullptr)
+    {
         trace_point("net_if_down(PPP) begin");
         net_if_down(iface);
         trace_point("net_if_down(PPP) returned");
@@ -419,33 +451,53 @@ int modem_disconnect(void *)
     trace_point("pm_device_runtime_put(modem) begin");
     int err = pm_device_runtime_put(modem);
     trace_point((err == 0 || err == -EALREADY) ? "pm_device_runtime_put(modem) complete"
-                                                : "pm_device_runtime_put(modem) failed");
-    if (err == -EALREADY) { err = 0; }
+                                               : "pm_device_runtime_put(modem) failed");
+    if (err == -EALREADY)
+    {
+        err = 0;
+    }
 #endif
     mark(MODEM_SUSPEND_DONE);
 
     trace_point("modem power domain off begin");
     const int domain_err = modem_domain_off();
-    trace_point(domain_err == 0 ? "modem power domain off complete"
-                                 : "modem power domain off failed");
-    if (domain_err != 0) { LOG_ERR("modem domain suspend failed (%d)", domain_err); }
+    trace_point(domain_err == 0 ? "modem power domain off complete" : "modem power domain off failed");
+    if (domain_err != 0)
+    {
+        LOG_ERR("modem domain suspend failed (%d)", domain_err);
+    }
 
     return (err != 0) ? err : domain_err;
 }
 
-const struct network_port g_default_port = {nullptr, modem_power_on, modem_connect, modem_send,
-                                              modem_disconnect, modem_power_off};
+const struct network_port g_default_port = {nullptr,    modem_power_on,   modem_connect,
+                                            modem_send, modem_disconnect, modem_power_off};
 
 #else // !CONFIG_FIREFLY_NETWORK
 
-int stub_power_on(void *) { return 0; }
-int stub_connect(void *) { return -ENOSYS; }
-int stub_send(void *, const void *, size_t) { return -ENOSYS; }
-int stub_disconnect(void *) { return 0; }
-int stub_power_off(void *) { return 0; }
+int stub_power_on(void *)
+{
+    return 0;
+}
+int stub_connect(void *)
+{
+    return -ENOSYS;
+}
+int stub_send(void *, const void *, size_t)
+{
+    return -ENOSYS;
+}
+int stub_disconnect(void *)
+{
+    return 0;
+}
+int stub_power_off(void *)
+{
+    return 0;
+}
 
-const struct network_port g_default_port = {nullptr, stub_power_on, stub_connect, stub_send,
-                                              stub_disconnect, stub_power_off};
+const struct network_port g_default_port = {nullptr,   stub_power_on,   stub_connect,
+                                            stub_send, stub_disconnect, stub_power_off};
 
 #endif
 
@@ -453,8 +505,9 @@ const struct network_port *g_port = &g_default_port;
 
 constexpr k_timeout_t kWait = K_MSEC(50);
 
-class SrvNetwork final : public firefly::Thread<CONFIG_FIREFLY_NETWORK_STACK_SIZE> {
-public:
+class SrvNetwork final : public firefly::Thread<CONFIG_FIREFLY_NETWORK_STACK_SIZE>
+{
+  public:
     SrvNetwork() : Thread(5, "srvNetwork")
     {
         k_sem_init(&processed_sem_, 0, 1);
@@ -462,29 +515,49 @@ public:
 
     int startNetwork(const struct zbus_observer *subscriber)
     {
-        if (subscriber == nullptr || subscriber->type != ZBUS_OBSERVER_MSG_SUBSCRIBER_TYPE) {
+        if (subscriber == nullptr || subscriber->type != ZBUS_OBSERVER_MSG_SUBSCRIBER_TYPE)
+        {
             return -EINVAL;
         }
-        if (isRunning()) { return -EALREADY; }
+        if (isRunning())
+        {
+            return -EALREADY;
+        }
 
         const int power_error = g_port->power_on(g_port->context);
-        if (power_error != 0) { return power_error; }
+        if (power_error != 0)
+        {
+            return power_error;
+        }
 
         subscriber_ = subscriber;
         has_result_ = false;
         return start();
     }
 
-    int lastResult() const { return has_result_ ? last_result_ : -ENODATA; }
+    int lastResult() const
+    {
+        return has_result_ ? last_result_ : -ENODATA;
+    }
 
-    uint32_t count() const { return static_cast<uint32_t>(atomic_get(&processed_)); }
+    uint32_t count() const
+    {
+        return static_cast<uint32_t>(atomic_get(&processed_));
+    }
 
     int waitProcessed(uint32_t previous, int32_t timeout_ms)
     {
-        if (timeout_ms < 0) { return -EINVAL; }
-        while (count() <= previous) {
+        if (timeout_ms < 0)
+        {
+            return -EINVAL;
+        }
+        while (count() <= previous)
+        {
             const int error = k_sem_take(&processed_sem_, K_MSEC(timeout_ms));
-            if (error != 0) { return error; }
+            if (error != 0)
+            {
+                return error;
+            }
         }
         return 0;
     }
@@ -500,53 +573,66 @@ public:
     }
 #endif
 
-protected:
+  protected:
     void run() override
     {
         LOG_INF("srvNetwork ready - waiting for button0");
-        while (!shouldStop()) {
+        while (!shouldStop())
+        {
             const struct zbus_channel *channel = nullptr;
             struct bus_msg message{};
             const int error = zbus_sub_wait_msg(subscriber_, &channel, &message, kWait);
-            if (error == -ENOMSG || error == -EAGAIN) { continue; }
-            if (error != 0) {
+            if (error == -ENOMSG || error == -EAGAIN)
+            {
+                continue;
+            }
+            if (error != 0)
+            {
                 LOG_ERR("message wait failed (%d)", error);
                 continue;
             }
-            if (channel != &bus_chan) {
+            if (channel != &bus_chan)
+            {
                 LOG_WRN("unexpected channel");
                 continue;
             }
-            if (message.kind != BUS_MSG_BUTTON || !bus_button_is_valid(&message.data.button)) {
+            if (message.kind != BUS_MSG_BUTTON || !bus_button_is_valid(&message.data.button))
+            {
                 continue;
             }
-            if (message.data.button.button != 0 || !message.data.button.pressed) {
+            if (message.data.button.button != 0 || !message.data.button.pressed)
+            {
                 continue;
             }
             runRound();
         }
 
         const int power_off_error = g_port->power_off(g_port->context);
-        if (power_off_error != 0) { LOG_ERR("modem power-off failed (%d)", power_off_error); }
+        if (power_off_error != 0)
+        {
+            LOG_ERR("modem power-off failed (%d)", power_off_error);
+        }
     }
 
-private:
+  private:
     void runRound()
     {
         g_round_start_ms = k_uptime_get();
         LOG_INF("============================================================");
         trace_point("button0 accepted: network round starts");
-        LOG_INF("NETTRACE destination=%s:%d payload=%u bytes connect_timeout=%d s",
-                CONFIG_FIREFLY_NETWORK_DEST_IP, CONFIG_FIREFLY_NETWORK_DEST_PORT,
-                static_cast<unsigned>(sizeof(CONFIG_FIREFLY_NETWORK_MESSAGE) - 1),
+        LOG_INF("NETTRACE destination=%s:%d payload=%u bytes connect_timeout=%d s", CONFIG_FIREFLY_NETWORK_DEST_IP,
+                CONFIG_FIREFLY_NETWORK_DEST_PORT, static_cast<unsigned>(sizeof(CONFIG_FIREFLY_NETWORK_MESSAGE) - 1),
                 CONFIG_FIREFLY_NETWORK_CONNECT_TIMEOUT_S);
         int err = g_port->connect(g_port->context);
         trace_point(err == 0 ? "connect() returned success" : "connect() returned failure");
 
-        if (err == 0 && shouldStop()) {
+        if (err == 0 && shouldStop())
+        {
             LOG_WRN("stop requested before send - skipping it");
             err = -ECANCELED;
-        } else if (err == 0) {
+        }
+        else if (err == 0)
+        {
             static const char message[] = CONFIG_FIREFLY_NETWORK_MESSAGE;
 
             LOG_INF("connected - sending %zu bytes", sizeof(message) - 1);
@@ -558,17 +644,22 @@ private:
             // result: by the time this call returns, everything it would
             // have said already happened.
             err = g_port->send(g_port->context, message, sizeof(message) - 1);
-            if (err != 0) {
+            if (err != 0)
+            {
                 LOG_ERR("send failed (%d)", err);
             }
-        } else {
+        }
+        else
+        {
             LOG_ERR("connect failed (%d)", err);
         }
 
         const int disconnect_err = g_port->disconnect(g_port->context);
-        trace_point(disconnect_err == 0 ? "disconnect() returned success"
-                                        : "disconnect() returned failure");
-        if (disconnect_err != 0) { LOG_ERR("disconnect failed (%d)", disconnect_err); }
+        trace_point(disconnect_err == 0 ? "disconnect() returned success" : "disconnect() returned failure");
+        if (disconnect_err != 0)
+        {
+            LOG_ERR("disconnect failed (%d)", disconnect_err);
+        }
 
         last_result_ = (err != 0) ? err : disconnect_err;
         has_result_ = true;
@@ -599,10 +690,22 @@ extern "C" int srvNetwork_start(const struct zbus_observer *subscriber)
 {
     return g_network.startNetwork(subscriber);
 }
-extern "C" int srvNetwork_stop(void) { return g_network.stop(); }
-extern "C" bool srvNetwork_is_running(void) { return g_network.isRunning(); }
-extern "C" int srvNetwork_last_result(void) { return g_network.lastResult(); }
-extern "C" uint32_t srvNetwork_processed_count(void) { return g_network.count(); }
+extern "C" int srvNetwork_stop(void)
+{
+    return g_network.stop();
+}
+extern "C" bool srvNetwork_is_running(void)
+{
+    return g_network.isRunning();
+}
+extern "C" int srvNetwork_last_result(void)
+{
+    return g_network.lastResult();
+}
+extern "C" uint32_t srvNetwork_processed_count(void)
+{
+    return g_network.count();
+}
 extern "C" int srvNetwork_wait_processed(uint32_t count, int32_t timeout_ms)
 {
     return g_network.waitProcessed(count, timeout_ms);
@@ -611,8 +714,9 @@ extern "C" int srvNetwork_wait_processed(uint32_t count, int32_t timeout_ms)
 #ifdef CONFIG_FIREFLY_TEST_HOOKS
 extern "C" int srvNetwork_set_port(const struct network_port *port)
 {
-    if (port == nullptr || port->power_on == nullptr || port->connect == nullptr ||
-        port->send == nullptr || port->disconnect == nullptr || port->power_off == nullptr) {
+    if (port == nullptr || port->power_on == nullptr || port->connect == nullptr || port->send == nullptr ||
+        port->disconnect == nullptr || port->power_off == nullptr)
+    {
         return -EINVAL;
     }
     g_port = port;

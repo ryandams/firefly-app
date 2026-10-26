@@ -23,9 +23,11 @@ extern "C"
     extern const struct zbus_observer test_network_sub;
 }
 
-namespace {
+namespace
+{
 
-struct FakeNetwork {
+struct FakeNetwork
+{
     int power_on_error{};
     int connect_error{};
     int connect_delay_ms{};
@@ -54,10 +56,12 @@ int fake_connect(void *ctx)
 {
     auto *fake = static_cast<FakeNetwork *>(ctx);
     fake->connect_calls++;
-    if (fake->connect_delay_ms > 0) {
+    if (fake->connect_delay_ms > 0)
+    {
         k_sleep(K_MSEC(fake->connect_delay_ms));
     }
-    if (fake->connect_error != 0) {
+    if (fake->connect_error != 0)
+    {
         return fake->connect_error;
     }
     fake->connected = true;
@@ -67,7 +71,8 @@ int fake_connect(void *ctx)
 int fake_send(void *ctx, const void *data, size_t len)
 {
     auto *fake = static_cast<FakeNetwork *>(ctx);
-    if (fake->send_error != 0) {
+    if (fake->send_error != 0)
+    {
         return fake->send_error;
     }
     fake->sent = true;
@@ -97,7 +102,8 @@ void drain()
 {
     const struct zbus_channel *channel;
     struct bus_msg message;
-    while (zbus_sub_wait_msg(&test_network_sub, &channel, &message, K_NO_WAIT) == 0) {
+    while (zbus_sub_wait_msg(&test_network_sub, &channel, &message, K_NO_WAIT) == 0)
+    {
     }
 }
 
@@ -107,7 +113,10 @@ int press_button0_and_wait(int timeout_ms)
     const uint32_t count = srvNetwork_processed_count();
     const button_event press{0, true};
     const int publish_error = bus_publish_button(&bus_chan, &press);
-    if (publish_error != 0) { return publish_error; }
+    if (publish_error != 0)
+    {
+        return publish_error;
+    }
     return srvNetwork_wait_processed(count, timeout_ms);
 }
 

@@ -14,7 +14,7 @@ extern "C"
      * test_srvNetwork.cpp, which references it via an extern declaration. */
     ZBUS_MSG_SUBSCRIBER_DEFINE(test_network_sub);
     ZBUS_CHAN_DEFINE(bus_chan, struct bus_msg, NULL, NULL, ZBUS_OBSERVERS(test_sub, test_network_sub),
-                      ZBUS_MSG_INIT(0));
+                     ZBUS_MSG_INIT(0));
     ZBUS_CHAN_DEFINE(unexpected_chan, struct bus_msg, NULL, NULL, ZBUS_OBSERVERS(test_sub), ZBUS_MSG_INIT(0));
 }
 
