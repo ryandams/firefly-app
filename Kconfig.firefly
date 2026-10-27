@@ -10,6 +10,61 @@
 
 menu "Firefly application"
 
+# The hardware a build is for. Set exactly one of each in prj.conf. Both are
+# read from prj.conf's text before Kconfig runs, so they can steer what
+# Kconfig itself cannot: the outer firefly repo's 3_build.sh picks the
+# board (west build -b) from FIREFLY_TARGET_BOARD, and CMakeLists.txt adds
+# the modem's conf/modem_<x>.conf + boards/<x>.overlay pair from
+# FIREFLY_TARGET_MODEM. CMakeLists.txt then checks both against the board
+# actually built, so a build for any other board fails loudly instead of
+# silently ignoring the selection.
+choice FIREFLY_TARGET_BOARD
+	prompt "Target board"
+	default FIREFLY_TARGET_BOARD_NRF54LM20DK
+
+config FIREFLY_TARGET_BOARD_NRF54LM20DK
+	bool "nRF54LM20 DK (nrf54lm20dk/nrf54lm20a/cpuapp)"
+	help
+	  No modem on board - pair with one of the external modems.
+
+config FIREFLY_TARGET_BOARD_NRF93M1DK
+	bool "nRF93M1 DK (nrf93m1dk/nrf54l15/cpuapp)"
+	help
+	  On-board nRF93M1 modem - pair with FIREFLY_TARGET_MODEM_NRF93M1.
+
+endchoice
+
+choice FIREFLY_TARGET_MODEM
+	prompt "Target modem"
+	default FIREFLY_TARGET_MODEM_NONE
+
+config FIREFLY_TARGET_MODEM_NONE
+	bool "No modem (nRF54LM20 DK only)"
+
+config FIREFLY_TARGET_MODEM_NRF93M1
+	bool "nRF93M1, on board the nRF93M1 DK"
+	help
+	  Configured by boards/nrf93m1dk_nrf54l15_cpuapp.conf - no fragment.
+
+config FIREFLY_TARGET_MODEM_EG800Z
+	bool "Quectel EG800Z, external on nRF54LM20 DK uart21"
+	help
+	  conf/modem_eg800z.conf + boards/eg800z.overlay. No AT+CMUX - driven
+	  directly by modemEg800zPpp.cpp.
+
+config FIREFLY_TARGET_MODEM_LE270
+	bool "Fibocom LE270, external on nRF54LM20 DK uart21"
+	help
+	  conf/modem_le270.conf + boards/le270.overlay. Same pins as the
+	  EG800Z; uses the modem_cellular transport.
+
+config FIREFLY_TARGET_MODEM_NRF93M1_EXT
+	bool "nRF93M1 module, external on nRF54LM20 DK uart30"
+	help
+	  conf/modem_nrf93m1_ext.conf + boards/nrf93m1_ext.overlay.
+
+endchoice
+
 config FIREFLY_LOG_LEVEL
 	int "Firefly log level"
 	default 3
@@ -58,8 +113,8 @@ config FIREFLY_NETWORK
 	  the options below, always exist - boards/tests without a modem
 	  wired up get a stub port instead and drive srvNetwork through
 	  CONFIG_FIREFLY_TEST_HOOKS's injectable port for testing.
-	  conf/modem_*.conf turns this on for whichever modem a build target
-	  selects - see the outer firefly repo's 31/32/33_build.sh.
+	  conf/modem_*.conf turns this on for whichever modem
+	  FIREFLY_TARGET_MODEM selects.
 
 config FIREFLY_MODEM_TEST_NRF93M1
 	bool "Enable the raw-AT nRF93M1 modem test"

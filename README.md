@@ -45,11 +45,12 @@ scripts/                   CI/static enforcement
 
 ## Modem targets
 
-Three modems are supported, selected at build time rather than by git
-branch - see the outer firefly repo's `31_build.sh`/`32_build.sh`/
-`33_build.sh`:
+The board and modem are selected in `prj.conf`
+(`CONFIG_FIREFLY_TARGET_BOARD_*` and `CONFIG_FIREFLY_TARGET_MODEM_*`, see
+`Kconfig.firefly`). `CMakeLists.txt` adds the selected modem's conf/overlay
+pair and fails the build if the selection doesn't match the board being built.
 
-- **nRF93M1** (on-board, `TARGET=nrf93m1dk`): uses
+- **nRF93M1** (on-board, `NRF93M1DK` + `NRF93M1`): uses
   `boards/nrf93m1dk_nrf54l15_cpuapp.conf` directly, no fragment needed.
 - **Quectel EG800Z** (external, uart21): `conf/modem_eg800z.conf` +
   `boards/eg800z.overlay`. No AT+CMUX - drives the modem directly via
@@ -59,9 +60,8 @@ branch - see the outer firefly repo's `31_build.sh`/`32_build.sh`/
   uses the plain `modem_cellular` transport
   (`FIREFLY_NETWORK_TRANSPORT_MODEM_CELLULAR`), same as the nRF93M1.
 
-An nRF93M1 module wired externally to this board (rather than the on-board
-nrf93m1dk target) is also available as `conf/modem_nrf93m1_ext.conf` +
-`boards/nrf93m1_ext.overlay` (uart30), with no dedicated build script yet.
+An nRF93M1 module wired externally to the nRF54LM20 DK (`NRF93M1_EXT`) uses
+`conf/modem_nrf93m1_ext.conf` + `boards/nrf93m1_ext.overlay` (uart30).
 
 All application components are compiled in every target, native simulator, and
 test build. Required LED aliases produce explicit build assertions. Test-only

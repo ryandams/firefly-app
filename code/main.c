@@ -16,7 +16,7 @@ ZBUS_MSG_SUBSCRIBER_DEFINE(srvNetwork_sub);
 
 /* srvModemTest_sub must only observe bus_chan when a modem test service is
  * actually going to drain it below (zbus_sub_wait_msg()) - neither raw-AT
- * test is built in the normal CONFIG_FIREFLY_NETWORK targets (31/32/33_build.sh),
+ * test is built in the normal CONFIG_FIREFLY_NETWORK configurations,
  * and zbus clones one message per observer on every publish regardless of
  * whether anyone reads it. A never-drained subscriber's clones pile up in
  * its own fifo and are never freed, so the shared

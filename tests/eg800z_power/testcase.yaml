@@ -7,7 +7,7 @@
 # (srvModemTest_eg800z, no CMUX) is covered here; the EG800Z's PPP path has
 # no modem_cellular device to query PM state on the way
 # tests/nrf93m1_power's ppp scenario does, so it is validated by flashing
-# 32_build.sh's image instead.
+# the app built with CONFIG_FIREFLY_TARGET_MODEM_EG800Z instead.
 #
 #   west twister -T firefly-app/tests/eg800z_power -p <board> \
 #       --device-testing --device-serial /dev/ttyACM0 --tag hardware
