@@ -49,6 +49,7 @@ The board and modem are selected in `prj.conf`
 (`CONFIG_FIREFLY_TARGET_BOARD_*` and `CONFIG_FIREFLY_TARGET_MODEM_*`, see
 `Kconfig.firefly`). `CMakeLists.txt` adds the selected modem's conf/overlay
 pair and fails the build if the selection doesn't match the board being built.
+native_sim builds ignore the selection and build no modem.
 
 - **nRF93M1** (on-board, `NRF93M1DK` + `NRF93M1`): uses
   `boards/nrf93m1dk_nrf54l15_cpuapp.conf` directly, no fragment needed.

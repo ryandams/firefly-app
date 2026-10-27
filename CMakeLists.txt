@@ -15,34 +15,52 @@ foreach(kind BOARD MODEM)
   string(REGEX REPLACE "^CONFIG_FIREFLY_TARGET_${kind}_(.*)=y$" "\\1" firefly_${kind} "${selected}")
 endforeach()
 
-# Checked here, before devicetree: a wrong overlay fails there with a far
-# less helpful message.
-if(firefly_MODEM STREQUAL "NRF93M1")
-  set(modem_board NRF93M1DK)
+# The board being built: sysbuild hands it to this image through its cache
+# file; a plain build has BOARD from -DBOARD or the environment.
+if(DEFINED SYSBUILD_CACHE)
+  file(STRINGS ${SYSBUILD_CACHE} build_board REGEX "^BOARD:STRING=")
+  string(REPLACE "BOARD:STRING=" "" build_board "${build_board}")
+elseif(DEFINED BOARD)
+  set(build_board ${BOARD})
 else()
-  set(modem_board NRF54LM20DK)
-endif()
-if(NOT firefly_BOARD STREQUAL modem_board)
-  message(FATAL_ERROR "prj.conf: modem ${firefly_MODEM} needs board ${modem_board}, not ${firefly_BOARD}")
+  set(build_board $ENV{BOARD})
 endif()
 
-string(TOLOWER "${firefly_MODEM}" modem)
-if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
-  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
-  list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/boards/${modem}.overlay)
+# native_sim ignores the hardware selection: the app runs on the host with
+# boards/native_sim.{conf,overlay}, no modem. Everything else is checked
+# here, before devicetree - a wrong overlay fails there with a far less
+# helpful message.
+if(build_board MATCHES "^native_sim")
+  set(firefly_hardware OFF)
+else()
+  set(firefly_hardware ON)
+  if(firefly_MODEM STREQUAL "NRF93M1")
+    set(modem_board NRF93M1DK)
+  else()
+    set(modem_board NRF54LM20DK)
+  endif()
+  if(NOT firefly_BOARD STREQUAL modem_board)
+    message(FATAL_ERROR "prj.conf: modem ${firefly_MODEM} needs board ${modem_board}, not ${firefly_BOARD}")
+  endif()
+  # build_board is e.g. nrf93m1dk/nrf54l15/cpuapp or nrf93m1dk@0.4.0/...
+  string(TOLOWER "${firefly_BOARD}" board)
+  if(NOT build_board MATCHES "^${board}([@/]|$)")
+    message(FATAL_ERROR "prj.conf selects board ${firefly_BOARD}, but this build is for ${build_board}")
+  endif()
+
+  string(TOLOWER "${firefly_MODEM}" modem)
+  if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
+    list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
+    list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/boards/${modem}.overlay)
+  endif()
 endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(firefly LANGUAGES C CXX)
 
-# The board is only known from here on (under sysbuild, BOARD is not set
-# before find_package).
-if(NOT CONFIG_BOARD_${firefly_BOARD})
-  message(FATAL_ERROR "prj.conf selects board ${firefly_BOARD}, but this build is for ${BOARD}")
-endif()
 # A later conf file could still change the choice, but the overlay is fixed
 # by then.
-if(NOT CONFIG_FIREFLY_TARGET_MODEM_${firefly_MODEM})
+if(firefly_hardware AND NOT CONFIG_FIREFLY_TARGET_MODEM_${firefly_MODEM})
   message(FATAL_ERROR "FIREFLY_TARGET_MODEM changed after prj.conf - set it only in prj.conf")
 endif()
 
