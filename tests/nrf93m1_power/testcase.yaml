@@ -7,8 +7,9 @@
 # mutually exclusive Kconfig choice, see Kconfig.firefly) between the two
 # approaches that already exist in this app: Zephyr's native PPP stack
 # (srvNetwork) and raw AT commands over the bare UART (srvModemTest_nrf93m1).
-# extra_configs below mirror boards/nrf93m1dk_nrf54l15_cpuapp.conf's two
-# (there, commented-out-by-default) modem modes.
+# extra_configs below mirror conf/modem_nrf93m1.conf's two modem modes (PPP
+# active there, raw-AT commented out). Both send to the echo server in
+# conf/echo_server.conf.
 #
 #   west twister -T firefly-app/tests/nrf93m1_power -p <board> \
 #       --device-testing --device-serial /dev/ttyACM0 --tag hardware
@@ -21,8 +22,11 @@ tests:
     tags: [firefly, hardware, modem, cellular, power, portable]
     harness: ztest
     timeout: 240
+    extra_args:
+      - EXTRA_CONF_FILE=../../conf/echo_server.conf
     extra_configs:
       - CONFIG_FIREFLY_NETWORK=y
+      - CONFIG_NET_CONTEXT_RCVTIMEO=y
       - CONFIG_NETWORKING=y
       - CONFIG_NET_NATIVE=y
       - CONFIG_NET_L2_PPP=y
@@ -53,6 +57,8 @@ tests:
     tags: [firefly, hardware, modem, cellular, power, portable]
     harness: ztest
     timeout: 240
+    extra_args:
+      - EXTRA_CONF_FILE=../../conf/echo_server.conf
     extra_configs:
       - CONFIG_FIREFLY_NETWORK=n
       - CONFIG_FIREFLY_MODEM_TEST_NRF93M1=y

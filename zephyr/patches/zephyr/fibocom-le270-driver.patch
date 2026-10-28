@@ -529,11 +529,11 @@ index 00000000000..448ccff6e33
 + * this project's actual payloads are tiny UDP messages); kept the larger of
 + * the two (1500) rather than the smaller, since shrinking RX below 1500
 + * risks truncating real inbound PPP frames, which is a correctness risk the
-+ * old TX-side headroom was never relying on. mtu=98 left unchanged - that's
-+ * the value this driver has actually been hardware-verified against all
-+ * session, not something this arity-only fix should also second-guess. */
++ * old TX-side headroom was never relying on. MTU is 1500 like every other
++ * modem_cellular driver here; it used to read 98, which was the old init
++ * priority argument landing in the new _mtu slot after the arity change. */
 +#define MODEM_CELLULAR_DEVICE_FIBOCOM_LE270(inst)                                                 \
-+	MODEM_DT_INST_PPP_DEFINE(inst, MODEM_CELLULAR_INST_NAME(ppp, inst), NULL, 98, 1500);      \
++	MODEM_DT_INST_PPP_DEFINE(inst, MODEM_CELLULAR_INST_NAME(ppp, inst), NULL, 1500, 1500);    \
 +                                                                                                   \
 +	static struct modem_cellular_data MODEM_CELLULAR_INST_NAME(data, inst) = {                \
 +		.chat_delimiter = "\r",                                                           \

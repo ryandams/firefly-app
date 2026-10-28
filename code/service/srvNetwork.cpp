@@ -398,21 +398,29 @@ int modem_send(void *, const void *data, size_t len)
         // test, etc.) recv() still returns once that elapses - this never
         // waits longer than the old behavior did, only ever the same or
         // less.
+        // A zero SO_RCVTIMEO means "block forever" to Zephyr, so a setting
+        // of 0, or a timeout that could not be set, skips the wait instead.
         struct timeval rcv_timeout = {};
         rcv_timeout.tv_sec = CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS / 1000;
         rcv_timeout.tv_usec = (CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS % 1000) * 1000;
-        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout)) != 0)
+        if (CONFIG_FIREFLY_NETWORK_SEND_SETTLE_MS == 0)
         {
-            LOG_WRN("setsockopt(SO_RCVTIMEO) failed (%d) - echo wait may block indefinitely", errno);
+            trace_point("SEND_SETTLE is 0 - not waiting for an echo");
         }
-
-        trace_point("waiting for echo (bounded by SEND_SETTLE as a timeout)");
-        char echo_buf[64];
-        struct sockaddr_in from = {};
-        socklen_t from_len = sizeof(from);
-        const ssize_t echoed =
-            recvfrom(sock, echo_buf, sizeof(echo_buf), 0, reinterpret_cast<struct sockaddr *>(&from), &from_len);
-        trace_point(echoed > 0 ? "echo received" : "no echo within timeout - proceeding anyway");
+        else if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout)) != 0)
+        {
+            LOG_WRN("setsockopt(SO_RCVTIMEO) failed (%d) - not waiting for an echo", errno);
+        }
+        else
+        {
+            trace_point("waiting for echo (bounded by SEND_SETTLE as a timeout)");
+            char echo_buf[64];
+            struct sockaddr_in from = {};
+            socklen_t from_len = sizeof(from);
+            const ssize_t echoed =
+                recvfrom(sock, echo_buf, sizeof(echo_buf), 0, reinterpret_cast<struct sockaddr *>(&from), &from_len);
+            trace_point(echoed > 0 ? "echo received" : "no echo within timeout - proceeding anyway");
+        }
     }
 
     close(sock);

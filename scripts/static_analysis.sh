@@ -6,5 +6,5 @@ rg -n 'zbus_chan_pub\(' "$root/code" | while IFS= read -r line; do
     case "$line" in *'return zbus_chan_pub'*) ;; *) echo "unchecked zbus publish: $line" >&2; exit 1 ;; esac
 done
 if command -v clang-tidy >/dev/null && [ -f "${1:-}/compile_commands.json" ]; then
-    clang-tidy -p "$1" "$root"/code/*.{c,cpp} "$root"/code/service/*.cpp
+    clang-tidy -p "$1" "$root"/code/*.c "$root"/code/helpers/*.cpp "$root"/code/service/*.{c,cpp}
 fi

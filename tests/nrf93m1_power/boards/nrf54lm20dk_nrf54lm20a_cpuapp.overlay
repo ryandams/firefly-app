@@ -1,27 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Duplicated from ../../../boards/nrf54lm20dk_nrf54lm20a_cpuapp.overlay -
- * this test is its own Zephyr application, so the top-level app's boards/
- * overlay isn't inherited here. See that file for the pin-choice rationale.
+ * This test is its own Zephyr application, so the app's overlays aren't
+ * inherited - include the external-nRF93M1 one directly.
  */
-#include <zephyr/dt-bindings/gpio/gpio.h>
-
-&uart30 {
-	status = "okay";
-	hw-flow-control;
-	zephyr,pm-device-runtime-auto;
-
-	modem: modem {
-		compatible = "nordic,nrf93m1";
-		mdm-power-gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
-		mdm-reset-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
-		zephyr,pm-device-runtime-auto;
-	};
-};
-
-/ {
-	aliases {
-		modem = &modem;
-	};
-};
+#include "../../../boards/nrf93m1_ext.overlay"

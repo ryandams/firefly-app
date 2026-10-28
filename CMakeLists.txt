@@ -48,9 +48,14 @@ else()
     message(FATAL_ERROR "prj.conf selects board ${firefly_BOARD}, but this build is for ${build_board}")
   endif()
 
+  # The echo server goes first so a modem fragment can still override it.
+  # The nRF93M1 DK's on-board modem needs no overlay.
   string(TOLOWER "${firefly_MODEM}" modem)
-  if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
-    list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
+  if(NOT modem STREQUAL "none")
+    list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/conf/echo_server.conf
+                                ${CMAKE_CURRENT_LIST_DIR}/conf/modem_${modem}.conf)
+  endif()
+  if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/boards/${modem}.overlay)
     list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/boards/${modem}.overlay)
   endif()
 endif()

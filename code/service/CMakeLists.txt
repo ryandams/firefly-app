@@ -5,8 +5,8 @@
 # calling it from add_subdirectory() in application mode makes Zephyr warn and
 # quietly not treat the result as a Zephyr library.
 #
-# Unlike core/, this layer does include <zephyr/...>, so it needs
-# zephyr_interface unconditionally.
+# The services include <zephyr/...>, so the library links zephyr_interface
+# unconditionally.
 
 add_library(firefly_service STATIC)
 target_sources(firefly_service PRIVATE srvController.cpp srvNetwork.cpp

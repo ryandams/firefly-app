@@ -68,8 +68,6 @@ enum Mark : size_t
     DEREG,
     POWERED_DOWN
 };
-const char *const kMarkNames[kMarkCount] = {"modem_ready", "rf_on",   "registered", "attached", "sock_ready",  "sent",
-                                            "replied",     "rx_done", "detached",   "dereg",    "powered_down"};
 
 // This service's own belief about modem power state - mdm-power-gpios is a
 // momentary power-key pulse, not a level-controlled enable line, so there
@@ -86,6 +84,12 @@ bool g_modem_powered = false;
 // for the PSM cycle is several minutes - and the shell reports "busy" rather
 // than blocking a shell thread for that long.
 K_MUTEX_DEFINE(g_modem_lock);
+
+// Received text for read_until()/read_cgmr_version(). Static rather than on
+// the stack: they also run on the shell thread ("modem at"), whose stack is
+// only 2 KB in the raw-AT configuration. Only touched under g_modem_lock.
+char g_rx_text[kRxSize];
+char g_rx_line[256];
 
 struct RunState
 {
@@ -173,10 +177,27 @@ bool registered_urc(const char *text)
     return false;
 }
 
+// Appends one byte to buf (NUL-terminated). Once full, drops the older half
+// so a long transcript (e.g. minutes of %HTTPURC during FOTA) can still match
+// text that arrives late; every expected pattern is far shorter than that.
+void append_rx(char *buf, size_t size, size_t &used, uint8_t byte)
+{
+    if (used + 1 >= size)
+    {
+        const size_t keep = size / 2;
+        memmove(buf, buf + used - keep, keep);
+        used = keep;
+    }
+    buf[used++] = static_cast<char>(byte);
+    buf[used] = '\0';
+}
+
 bool read_until(RunState &s, const char *expected, int32_t timeout_ms, bool cereg_pattern = false)
 {
-    char buffer[kRxSize]{};
-    char line[256]{};
+    char *const buffer = g_rx_text;
+    char *const line = g_rx_line;
+    constexpr size_t kLineSize = sizeof(g_rx_line);
+    buffer[0] = '\0';
     size_t used = 0;
     size_t line_used = 0;
     int64_t first = -1;
@@ -195,11 +216,7 @@ bool read_until(RunState &s, const char *expected, int32_t timeout_ms, bool cere
         {
             first = k_uptime_get();
         }
-        if (used + 1 < sizeof(buffer))
-        {
-            buffer[used++] = static_cast<char>(byte);
-            buffer[used] = '\0';
-        }
+        append_rx(buffer, kRxSize, used, byte);
         if (byte == '\r' || byte == '\n')
         {
             if (line_used != 0)
@@ -211,7 +228,7 @@ bool read_until(RunState &s, const char *expected, int32_t timeout_ms, bool cere
         }
         else
         {
-            if (line_used + 1 < sizeof(line))
+            if (line_used + 1 < kLineSize)
             {
                 line[line_used++] = static_cast<char>(byte);
             }
@@ -267,7 +284,8 @@ int send_at(RunState &s, const char *command, const char *expected = "OK", int32
 bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_ms = 5000)
 {
     static const char kPrefix[] = "mfw_nrf93m1_";
-    char buffer[kRxSize]{};
+    char *const buffer = g_rx_text;
+    buffer[0] = '\0';
     size_t used = 0;
     const int64_t tx = k_uptime_get();
     printk("  TX [%8.4f] AT+CGMR\n", seconds(tx - s.t0));
@@ -282,7 +300,7 @@ bool read_cgmr_version(RunState &s, char *out, size_t out_size, int32_t timeout_
             k_sleep(K_MSEC(kPollMs));
             continue;
         }
-        if (used + 1 < sizeof(buffer))
+        if (used + 1 < kRxSize)
         {
             buffer[used++] = static_cast<char>(byte);
             buffer[used] = '\0';
@@ -570,9 +588,13 @@ int wait_for_modem_ready(RunState &s, bool mark_ready = true,
 // Modem-on -> modem-off. Tries the driver's own software shutdown command
 // first (AT%POWD=1, matching cellular_nordic_nrf93m1.c's shutdown chat
 // script); if that isn't confirmed within the timeout, falls back to the
-// same power-key pulse used to power the modem up. Releases the modem_dcdc
-// rail claimed in power_up_modem() either way, so a failed shutdown still
-// leaves nothing energized.
+// same power-key pulse used to power the modem up.
+//
+// The modem_dcdc rail claimed in power_up_modem() is NOT released: the
+// pm_device_runtime_put() below is commented out (reason not recorded), so
+// the rail stays on after the first round and its usage count grows by one
+// per power_up_modem() call. Re-enabling it also needs power_up_modem() to
+// stop claiming the rail again on every PSM wake (psm_socket_round()).
 int power_down_modem(RunState &s)
 {
     int result;
@@ -879,6 +901,13 @@ int run_test()
     LOG_INF("\n=== Power down ===\n");
     REQUIRED(power_down_modem(s));
 done:
+    // A failed step skips the power-down above; don't leave the modem on
+    // until the next round.
+    if (g_modem_powered)
+    {
+        printk("\n=== Power down (after failure) ===\n");
+        power_down_modem(s);
+    }
     report(s);
     return err;
 #undef REQUIRED
@@ -906,9 +935,9 @@ constexpr int kPsmIdleSeconds = 60;
 // 115200 - "the POWERKEY or power cycle must be used" instead, and
 // firmware support for higher-baud wake is only planned for a future
 // modem firmware release, not available now. power_up_modem() is safe to
-// call again here: the modem_dcdc rail is already claimed from the
-// original power-up and pm_device_runtime_get() on it is idempotent, and
-// flush_rx() clearing the ring buffer before the wake response arrives is
+// call again here: the modem_dcdc rail is already on, so the extra
+// pm_device_runtime_get() only raises its usage count (see
+// power_down_modem()), and flush_rx() clearing the ring buffer before the wake response arrives is
 // exactly what's wanted anyway.
 // wait_for_modem_ready() (mark_ready = false, reused rather than a
 // separate poll loop) then confirms the modem is back and responding to
@@ -984,8 +1013,8 @@ int psm_socket_round(RunState &s, int cycle)
 // AT+CPSMS's timers are negotiated with the network during Attach/TAU
 // signaling, not the instant the command is sent, and this modem has no
 // PSM-entry confirmation URC - so the idle window below is a best-effort
-// wait (per the nRF93M1 AT command reference: Active-Time "00000001" =
-// 1 x 2s unit), not a verified sleep duration. Nothing is sent during the
+// wait (Active-Time is requested as "00000000", i.e. 0 x 2s units - see
+// "Enable PSM" below), not a verified sleep duration. Nothing is sent during the
 // idle window itself, letting the modem settle into PSM - psm_socket_round()
 // runs an explicit wake step (wait_for_modem_ready()) at the start of each
 // cycle instead of assuming the first AT command of the next cycle will
@@ -1040,10 +1069,10 @@ int run_psm_cycle_test()
     // locally; the network has no reason to act on them until the next
     // periodic TAU, which is minutes away here - almost certainly why real
     // PSM was never reached regardless of Active-Time tuning. Active-Time
-    // itself stays short (2s = "00000001"): that's how long the modem
-    // stays in higher-current RRC-idle after RRC release before the uA-
-    // level PSM floor begins.
-    printk("\n=== Enable PSM (Active-Time 2s, requested before attach) ===\n");
+    // is requested as 0 ("00000000"; "00000001" would be 2s): that's how
+    // long the modem stays in higher-current RRC-idle after RRC release
+    // before the uA-level PSM floor begins.
+    printk("\n=== Enable PSM (Active-Time 0s, requested before attach) ===\n");
     REQUIRED(send_at(s, "AT%MODULECFG=\"ledMode\",0"));
     REQUIRED(send_at(s, "AT%MODULECFG=\"logCtrl\",0"));
     REQUIRED(send_at(s, "AT%MODULECFG=\"usbCtrl\",2"));
@@ -1089,9 +1118,6 @@ int run_psm_cycle_test()
     }
 
     REQUIRED(psm_socket_round(s, kPsmCycleCount + 1));
-
-    printk("\n=== PSM cycle %d/%d: idle %d s (RRC release + Active-Time, then PSM) ===\n", kPsmCycleCount + 1,
-           kPsmCycleCount, kPsmIdleSeconds);
     flush_rx();
 
     printk("\n=== Teardown ===\n");
@@ -1101,6 +1127,11 @@ int run_psm_cycle_test()
     printk("\n=== Power down ===\n");
     REQUIRED(power_down_modem(s));
 done:
+    if (g_modem_powered)
+    {
+        printk("\n=== Power down (after failure) ===\n");
+        power_down_modem(s);
+    }
     printk("\n=== PSM cycle test finished (%d) ===\n", err);
     return err;
 #undef REQUIRED
@@ -1281,12 +1312,9 @@ int cmd_modem_on(const struct shell *sh, size_t, char **)
     {
         err = power_up_modem();
     }
-    // Plain wait_for_modem_ready(). The uart9600 branch calls its
-    // baud-recovery helper here instead, but that helper exists only to
-    // rescue a modem left at 9600 by a PSM round interrupted midway. This
-    // branch keeps the POWERKEY-based PSM wake and never sets a baud rate on
-    // the modem, so nothing can leave it at a stale one - it is always
-    // expected to answer at 115200.
+    // Plain wait_for_modem_ready(), no baud recovery: the PSM wake uses
+    // POWERKEY and nothing here ever changes the modem's baud rate, so it
+    // always answers at 115200.
     if (err == 0)
     {
         err = wait_for_modem_ready(state);

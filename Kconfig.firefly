@@ -44,7 +44,7 @@ config FIREFLY_TARGET_MODEM_NONE
 config FIREFLY_TARGET_MODEM_NRF93M1
 	bool "nRF93M1, on board the nRF93M1 DK"
 	help
-	  Configured by boards/nrf93m1dk_nrf54l15_cpuapp.conf - no fragment.
+	  Configured by conf/modem_nrf93m1.conf - no overlay.
 
 config FIREFLY_TARGET_MODEM_EG800Z
 	bool "Quectel EG800Z, external on nRF54LM20 DK uart21"
@@ -367,5 +367,7 @@ config FIREFLY_NETWORK_SEND_SETTLE_MS
 	  unreachable, reply lost, antenna removed for a coverage test, etc.),
 	  recv() still returns once this timeout elapses, so behavior never
 	  waits longer than it did before - only ever the same or less.
+	  0 skips the wait entirely (Zephyr would treat a zero SO_RCVTIMEO
+	  as "block forever").
 
 endmenu

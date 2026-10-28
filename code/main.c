@@ -12,28 +12,33 @@
 LOG_MODULE_REGISTER(main, CONFIG_FIREFLY_LOG_LEVEL);
 
 ZBUS_MSG_SUBSCRIBER_DEFINE(srvController_sub);
-ZBUS_MSG_SUBSCRIBER_DEFINE(srvNetwork_sub);
 
-/* srvModemTest_sub must only observe bus_chan when a modem test service is
- * actually going to drain it below (zbus_sub_wait_msg()) - neither raw-AT
- * test is built in the normal CONFIG_FIREFLY_NETWORK configurations,
- * and zbus clones one message per observer on every publish regardless of
- * whether anyone reads it. A never-drained subscriber's clones pile up in
- * its own fifo and are never freed, so the shared
- * CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_SIZE pool (16 by default) silently
- * runs out after that many publishes - confirmed on real hardware as
+/* A subscriber may only observe bus_chan when a service below actually
+ * drains it (zbus_sub_wait_msg()). zbus clones one message per observer on
+ * every publish regardless of whether anyone reads it. A never-drained
+ * subscriber's clones pile up in its own fifo and are never freed, so the
+ * shared CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_SIZE pool (16) silently runs
+ * out - confirmed on real hardware as
  * "zbus: could not deliver notification to observer . Error code -12"
  * (net_buf_clone() returning -ENOMEM) starting on the button's 8th press and
- * on every press after that, permanently, since nothing ever frees the
- * leaked buffers. */
-#if defined(CONFIG_FIREFLY_MODEM_TEST_NRF93M1) || defined(CONFIG_FIREFLY_MODEM_TEST_EG800Z)
-ZBUS_MSG_SUBSCRIBER_DEFINE(srvModemTest_sub);
-#define BUS_CHAN_OBSERVERS ZBUS_OBSERVERS(srvController_sub, srvNetwork_sub, srvModemTest_sub)
+ * on every press after that, permanently. So srvNetwork_sub exists only with
+ * CONFIG_FIREFLY_NETWORK, and srvModemTest_sub only with a raw-AT test. */
+#ifdef CONFIG_FIREFLY_NETWORK
+ZBUS_MSG_SUBSCRIBER_DEFINE(srvNetwork_sub);
+#define NETWORK_OBSERVER , srvNetwork_sub
 #else
-#define BUS_CHAN_OBSERVERS ZBUS_OBSERVERS(srvController_sub, srvNetwork_sub)
+#define NETWORK_OBSERVER
 #endif
 
-ZBUS_CHAN_DEFINE(bus_chan, struct bus_msg, NULL, NULL, BUS_CHAN_OBSERVERS, ZBUS_MSG_INIT(0));
+#if defined(CONFIG_FIREFLY_MODEM_TEST_NRF93M1) || defined(CONFIG_FIREFLY_MODEM_TEST_EG800Z)
+ZBUS_MSG_SUBSCRIBER_DEFINE(srvModemTest_sub);
+#define MODEM_TEST_OBSERVER , srvModemTest_sub
+#else
+#define MODEM_TEST_OBSERVER
+#endif
+
+ZBUS_CHAN_DEFINE(bus_chan, struct bus_msg, NULL, NULL,
+                 ZBUS_OBSERVERS(srvController_sub NETWORK_OBSERVER MODEM_TEST_OBSERVER), ZBUS_MSG_INIT(0));
 
 int main(void)
 {

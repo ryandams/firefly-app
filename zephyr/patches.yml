@@ -208,7 +208,7 @@ patches:
       proven cleanup path) specifically so it can be verified in isolation
       before any further optimization-pass changes continue.
   - path: zephyr/fibocom-le270-driver.patch
-    sha256sum: ce2407158af6fe98771cb4890b92dd18c9ea693c76f6dc6ace31cb10e5f34c98
+    sha256sum: f872e1059faad4e810602e21a18ca9a89c77ab7e14bf5c9d8ac467d80246bc04
     module: zephyr
     author: firefly
     email: Ryan.damsgaard@gsfleet.io

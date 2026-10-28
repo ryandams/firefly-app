@@ -33,13 +33,6 @@ extern "C"
 #define FIREFLY_SW_APP_VERSION "0.1.0-nover"
 #endif
 
-#define FIREFLY_CONFIG_PRODUCTION 0
-#define FIREFLY_CONFIG_DEVELOPMENT 1
-#define FIREFLY_CONFIG_VERSION FIREFLY_CONFIG_DEVELOPMENT
-
-#define FIREFLY_MINUTE (60)
-#define FIREFLY_HOUR (60 * FIREFLY_MINUTE)
-
 #ifdef __cplusplus
 }
 #endif
