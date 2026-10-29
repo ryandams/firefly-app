@@ -878,3 +878,19 @@ patches:
       disconnect-timeout acceptance criteria from Changes 5/6 above both
       depend on exact values that are unchanged by this re-port, only
       renamed/relocated).
+  - path: zephyr/sysview-isr-names.patch
+    sha256sum: 77eb01827ec45188ccccc0c75ad4c886268d331f0a0243c4ecac3bf4f0437e0d
+    module: zephyr
+    author: firefly
+    email: Ryan.damsgaard@gsfleet.io
+    date: 2026-10-28
+    upstreamable: true
+    comments: |
+      With CONFIG_SYMTAB, Zephyr's SystemView glue names each ISR after its
+      handler function, but several peripherals share one handler: both
+      UARTEs are uarte_nrfx_isr_async, both GPIOTEs
+      gpio_nrfx_gpiote_irq_handler, and GRTC/clock are both nrfx_isr. This
+      adds what tells them apart: the struct device's name when the ISR arg
+      is a device, the real handler when the arg is a function (nrfx_isr),
+      and otherwise the IRQ number. Only changes the "I#<n>=" system
+      description strings sent when recording starts; no runtime cost.

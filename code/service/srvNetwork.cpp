@@ -38,6 +38,10 @@
 #include <zephyr/zbus/zbus.h>
 #include <errno.h>
 
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+#include <SEGGER_SYSVIEW.h>
+#endif
+
 #ifdef CONFIG_FIREFLY_NETWORK
 #include <zephyr/device.h>
 #include <zephyr/drivers/cellular.h>
@@ -67,11 +71,81 @@ namespace
 
 int64_t g_round_start_ms;
 
+// SystemView view of a round (CONFIG_SEGGER_SYSTEMVIEW; no-ops otherwise).
+// Every trace_point() also lands in SystemView's message log, and each phase
+// below is a named marker span on its timeline, next to the thread and ISR
+// activity it caused. The spans match report()'s PHASE BREAKDOWN.
+enum Span : unsigned
+{
+    SPAN_ROUND,
+    SPAN_MODEM_RESUME,
+    SPAN_AWAIT_L4,
+    SPAN_SEND,
+    SPAN_ECHO_WAIT,
+    SPAN_IF_DOWN,
+    SPAN_MODEM_SUSPEND,
+};
+
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+const char *const kSpanNames[] = {
+    "network round", "modem resume", "await L4 (register/PDP/PPP)", "send", "echo wait", "iface down", "modem suspend",
+};
+#endif
+
+// Opens a span until end() or the end of its scope, so an early error
+// return still closes it.
+class SysviewSpan
+{
+  public:
+    explicit SysviewSpan(Span span) : span_(span)
+    {
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+        // Named every time: a name sent before recording started is lost.
+        SEGGER_SYSVIEW_NameMarker(span_, kSpanNames[span_]);
+        SEGGER_SYSVIEW_MarkStart(span_);
+#endif
+    }
+    ~SysviewSpan()
+    {
+        end();
+    }
+    SysviewSpan(const SysviewSpan &) = delete;
+    SysviewSpan &operator=(const SysviewSpan &) = delete;
+
+    void end()
+    {
+        if (open_)
+        {
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+            SEGGER_SYSVIEW_MarkStop(span_);
+#endif
+            open_ = false;
+        }
+    }
+
+  private:
+    [[maybe_unused]] Span span_;
+    bool open_ = true;
+};
+
+// Shown in SystemView's log as an error, for a round that failed.
+void sysview_error(const char *text)
+{
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+    SEGGER_SYSVIEW_Error(text);
+#else
+    ARG_UNUSED(text);
+#endif
+}
+
 void trace_point(const char *stage)
 {
     const int64_t now = k_uptime_get();
     LOG_INF("NETTRACE t=%lld ms elapsed=%lld ms | %s", static_cast<long long>(now),
             static_cast<long long>(now - g_round_start_ms), stage);
+#ifdef CONFIG_SEGGER_SYSTEMVIEW
+    SEGGER_SYSVIEW_Print(stage);
+#endif
 }
 
 #ifdef CONFIG_FIREFLY_NETWORK
@@ -294,6 +368,7 @@ int modem_connect(void *)
     k_event_set(&g_l4_event, 0);
     g_marks = {};
 
+    SysviewSpan resume_span(SPAN_MODEM_RESUME);
     trace_point("modem power domain on begin");
     int err = modem_domain_on();
     trace_point(err == 0 ? "modem power domain on complete" : "modem power domain on failed");
@@ -327,6 +402,8 @@ int modem_connect(void *)
     }
 #endif
     mark(MODEM_RESUME_DONE);
+    resume_span.end();
+    SysviewSpan l4_span(SPAN_AWAIT_L4);
 
     trace_point("net_if_up(PPP) begin (registration/PDP/PPP may occur hereafter)");
     err = net_if_up(iface);
@@ -363,6 +440,7 @@ int modem_send(void *, const void *data, size_t len)
         return -EINVAL;
     }
 
+    SysviewSpan send_span(SPAN_SEND);
     trace_point("socket(AF_INET, SOCK_DGRAM) begin");
     const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock < 0)
@@ -381,6 +459,7 @@ int modem_send(void *, const void *data, size_t len)
     {
         mark(SENT);
     }
+    send_span.end();
 
     if (sent >= 0)
     {
@@ -414,6 +493,7 @@ int modem_send(void *, const void *data, size_t len)
         else
         {
             trace_point("waiting for echo (bounded by SEND_SETTLE as a timeout)");
+            SysviewSpan echo_span(SPAN_ECHO_WAIT);
             char echo_buf[64];
             struct sockaddr_in from = {};
             socklen_t from_len = sizeof(from);
@@ -443,6 +523,7 @@ int modem_disconnect(void *)
     struct net_if *iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
     trace_point("disconnect begin");
     mark(DISCONNECT_BEGIN);
+    SysviewSpan down_span(SPAN_IF_DOWN);
     if (iface != nullptr)
     {
         trace_point("net_if_down(PPP) begin");
@@ -450,6 +531,8 @@ int modem_disconnect(void *)
         trace_point("net_if_down(PPP) returned");
     }
     mark(IF_DOWN_DONE);
+    down_span.end();
+    SysviewSpan suspend_span(SPAN_MODEM_SUSPEND);
 
 #ifdef CONFIG_FIREFLY_NETWORK_TRANSPORT_EG800Z_PPP
     trace_point("EG800Z link_down begin");
@@ -625,6 +708,7 @@ class SrvNetwork final : public firefly::Thread<CONFIG_FIREFLY_NETWORK_STACK_SIZ
   private:
     void runRound()
     {
+        SysviewSpan round_span(SPAN_ROUND);
         g_round_start_ms = k_uptime_get();
         LOG_INF("============================================================");
         trace_point("button0 accepted: network round starts");
@@ -671,6 +755,10 @@ class SrvNetwork final : public firefly::Thread<CONFIG_FIREFLY_NETWORK_STACK_SIZ
 
         last_result_ = (err != 0) ? err : disconnect_err;
         has_result_ = true;
+        if (last_result_ != 0)
+        {
+            sysview_error("network round failed");
+        }
         LOG_INF("NETTRACE SUMMARY total_button_to_finish=%lld ms result=%d",
                 static_cast<long long>(k_uptime_get() - g_round_start_ms), last_result_);
 #ifdef CONFIG_FIREFLY_NETWORK

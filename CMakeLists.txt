@@ -73,6 +73,11 @@ add_subdirectory(code/helpers helpers_build)
 add_subdirectory(code/service service_build)
 
 target_sources(app PRIVATE code/main.c code/event_bus.c)
+# Straight into app, not firefly_helpers: nothing references it, so the
+# linker would drop it from the static library.
+if(CONFIG_SEGGER_SYSTEMVIEW)
+  target_sources(app PRIVATE code/helpers/sysviewWatermark.cpp)
+endif()
 
 # House style: bare-filename includes.
 target_include_directories(app PRIVATE

@@ -1,0 +1,64 @@
+diff --git a/subsys/tracing/sysview/sysview_config.c b/subsys/tracing/sysview/sysview_config.c
+index ec471afe7cd..2ab91f9ffc8 100644
+--- a/subsys/tracing/sysview/sysview_config.c
++++ b/subsys/tracing/sysview/sysview_config.c
+@@ -10,6 +10,8 @@
+ #ifdef CONFIG_SYMTAB
+ #include <zephyr/debug/symtab.h>
+ #include <zephyr/sw_isr_table.h>
++#include <zephyr/device.h>
++#include <string.h>
+ #endif
+ 
+ extern const SEGGER_SYSVIEW_OS_API SYSVIEW_X_OS_TraceAPI;
+@@ -51,6 +53,32 @@ void sys_trace_thread_info(struct k_thread *thread)
+ }
+ 
+ 
++#ifdef CONFIG_SYMTAB
++/* firefly: tell apart interrupts that share one handler (two UARTEs, two
++ * GPIOTEs, nrfx_isr for several peripherals). A driver ISR's arg is usually
++ * its struct device, and nrfx_isr's arg is the real handler function. Returns
++ * NULL when arg is neither; the caller then appends the IRQ number.
++ */
++static const char *isr_arg_name(const void *arg)
++{
++	STRUCT_SECTION_START_EXTERN(device);
++	STRUCT_SECTION_END_EXTERN(device);
++	uint32_t offset;
++	const char *sym;
++
++	if (arg == NULL) {
++		return NULL;
++	}
++	if ((const struct device *)arg >= STRUCT_SECTION_START(device) &&
++	    (const struct device *)arg < STRUCT_SECTION_END(device)) {
++		return ((const struct device *)arg)->name;
++	}
++	sym = symtab_find_symbol_name((uintptr_t)arg, &offset);
++	/* offset 1: a Thumb function pointer has bit 0 set */
++	return (strcmp(sym, "?") != 0 && offset <= 1) ? sym : NULL;
++}
++#endif
++
+ static void cbSendSystemDesc(void)
+ {
+ 	SEGGER_SYSVIEW_SendSysDesc("N=" CONFIG_SEGGER_SYSVIEW_APP_NAME);
+@@ -72,8 +100,15 @@ static void cbSendSystemDesc(void)
+ 			continue;
+ 		}
+ 		const char *name = symtab_find_symbol_name((uintptr_t)entry->isr, NULL);
+-
+-		snprintf(isr_desc, SEGGER_SYSVIEW_MAX_STRING_LEN, "I#%d=%s", idx + 16, name);
++		const char *what = isr_arg_name(entry->arg);
++
++		if (what != NULL) {
++			snprintf(isr_desc, SEGGER_SYSVIEW_MAX_STRING_LEN, "I#%d=%s %s",
++				 idx + 16, name, what);
++		} else {
++			snprintf(isr_desc, SEGGER_SYSVIEW_MAX_STRING_LEN, "I#%d=%s #%d",
++				 idx + 16, name, idx);
++		}
+ 
+ 		SEGGER_SYSVIEW_SendSysDesc(isr_desc);
+ 	}
